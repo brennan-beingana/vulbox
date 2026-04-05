@@ -1,0 +1,53 @@
+{
+  "alerts": [
+    {
+      "priority": "Warning",
+      "rule": "Terminal shell in container",
+      "time": "2024-01-10T10:15:00Z",
+      "output": "Bash shell spawned unexpectedly in container",
+      "container": {
+        "name": "test-app",
+        "id": "abc123def456789"
+      },
+      "process": {
+        "name": "bash",
+        "args": "-i"
+      },
+      "file": null
+    },
+    {
+      "priority": "Critical",
+      "rule": "Write below root dir",
+      "time": "2024-01-10T10:16:30Z",
+      "output": "File write detected in /etc directory",
+      "container": {
+        "name": "test-app",
+        "id": "abc123def456789"
+      },
+      "process": {
+        "name": "python",
+        "args": "app.py"
+      },
+      "file": {
+        "name": "/etc/suspicious.conf"
+      }
+    },
+    {
+      "priority": "Error",
+      "rule": "Sensitive file accessed",
+      "time": "2024-01-10T10:17:15Z",
+      "output": "Access to /etc/shadow detected",
+      "container": {
+        "name": "test-app",
+        "id": "abc123def456789"
+      },
+      "process": {
+        "name": "whoami",
+        "args": null
+      },
+      "file": {
+        "name": "/etc/shadow"
+      }
+    }
+  ]
+}

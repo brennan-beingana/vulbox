@@ -1,0 +1,28 @@
+{
+  "tests": [
+    {
+      "technique_id": "T1059.004",
+      "technique_name": "Unix Shell",
+      "test_name": "bash_execution_via_sh",
+      "status": "success",
+      "timestamp": "2024-01-10T10:15:05Z",
+      "message": "Bash shell execution detected matching T1059.004 pattern"
+    },
+    {
+      "technique_id": "T1543.002",
+      "technique_name": "Systemd Service",
+      "test_name": "create_systemd_service",
+      "status": "success",
+      "timestamp": "2024-01-10T10:16:35Z",
+      "message": "Systemd service creation detected"
+    },
+    {
+      "technique_id": "T1566.002",
+      "technique_name": "Phishing: Spearphishing Link",
+      "test_name": "phishing_attempt",
+      "status": "failure",
+      "timestamp": "2024-01-10T10:17:20Z",
+      "message": "Phishing detection test (benign environment, expected failure)"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "ArtifactName": "test-app:latest",
+  "ArtifactType": "container_image",
+  "Results": [
+    {
+      "Target": "test-app:latest",
+      "Class": "os-pkgs",
+      "Type": "apk",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2024-1234",
+          "Severity": "HIGH",
+          "Title": "OpenSSL remote code execution",
+          "Description": "Memory corruption in OpenSSL TLS handling allows remote code execution",
+          "PkgName": "openssl",
+          "PkgVersion": "3.0.0",
+          "FixedVersion": "3.0.5"
+        },
+        {
+          "VulnerabilityID": "CVE-2024-5678",
+          "Severity": "MEDIUM",
+          "Title": "musl libc DNS buffer overflow",
+          "Description": "Buffer overflow in musl libc DNS resolver allows denial of service",
+          "PkgName": "musl",
+          "PkgVersion": "1.2.3",
+          "FixedVersion": "1.2.4"
+        },
+        {
+          "VulnerabilityID": "CVE-2024-9999",
+          "Severity": "LOW",
+          "Title": "curl information disclosure",
+          "Description": "Minor information disclosure in curl library",
+          "PkgName": "curl",
+          "PkgVersion": "7.88.0",
+          "FixedVersion": "7.88.1"
+        }
+      ]
+    }
+  ]
+}
