@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 
-const API = "http://127.0.0.1:8000";
+const API = "http://46.101.193.155:8000";
 
 export default function Login() {
   const navigate = useNavigate();

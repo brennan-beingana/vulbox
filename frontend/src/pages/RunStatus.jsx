@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-const WS_BASE = "ws://127.0.0.1:8000";
+const WS_BASE = "ws://46.101.193.155:8000";
 
 const PHASE_ORDER = ["SUBMITTED", "BUILDING", "SCANNING", "TESTING", "REPORTING", "COMPLETE"];
 
