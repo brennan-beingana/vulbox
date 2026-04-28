@@ -1,0 +1,65 @@
+name: VulBox Security Assessment
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  assess:
+    name: Automated Security Assessment
+    runs-on: ubuntu-latest
+
+    services:
+      vulbox-api:
+        image: ghcr.io/${{ github.repository }}/vulbox-api:latest
+        ports:
+          - "8000:8000"
+        env:
+          VULBOX_DEV_MODE: "false"
+        options: >-
+          --health-cmd "curl -f http://localhost:8000/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Register assessment run
+        id: create_run
+        run: |
+          RUN_ID=$(curl -sf -X POST http://localhost:8000/runs \
+            -H "Content-Type: application/json" \
+            -d '{"project_name":"${{ github.repository }}","repo_url":"${{ github.server_url }}/${{ github.repository }}","branch":"${{ github.ref_name }}","commit_sha":"${{ github.sha }}","consent_granted":true}' \
+            | jq -r .id)
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for assessment to complete
+        run: |
+          for i in $(seq 1 60); do
+            STATUS=$(curl -sf http://localhost:8000/runs/${{ steps.create_run.outputs.run_id }} | jq -r .status)
+            echo "Status: $STATUS"
+            if [[ "$STATUS" == "COMPLETE" || "$STATUS" == "FAILED" ]]; then break; fi
+            sleep 10
+          done
+
+      - name: Download report
+        run: |
+          curl -sf http://localhost:8000/reports/${{ steps.create_run.outputs.run_id }}/export?format=json \
+            > vulbox-report.json
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulbox-report
+          path: vulbox-report.json

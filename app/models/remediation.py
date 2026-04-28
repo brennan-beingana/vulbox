@@ -10,8 +10,10 @@ class Remediation(Base):
     __tablename__ = "remediations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id"), index=True)
-    correlated_finding_id: Mapped[int] = mapped_column(ForeignKey("correlated_findings.id"), nullable=False)
+    run_id: Mapped[int] = mapped_column(ForeignKey("assessment_runs.id"), index=True)
+    matrix_entry_id: Mapped[int] = mapped_column(
+        ForeignKey("security_matrix_entries.entry_id"), nullable=False
+    )
     summary: Mapped[str] = mapped_column(String(300), nullable=False)
     priority_action: Mapped[str] = mapped_column(String(500), nullable=False)
     why_it_matters: Mapped[str] = mapped_column(String(500), default="")

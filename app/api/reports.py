@@ -1,15 +1,19 @@
-from fastapi import APIRouter, Depends
+import csv
+import io
+
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.correlated_finding import CorrelatedFinding
-from app.models.finding import Finding
 from app.models.remediation import Remediation
-from app.models.run import Run
+from app.models.security_matrix_entry import SecurityMatrixEntry
+from app.models.trivy_finding import TrivyFinding
+from app.models.art_test_result import ARTTestResult
 from app.schemas.report import (
-    CorrelatedFindingResponseSchema,
     RemediationResponseSchema,
     ReportResponse,
+    SecurityMatrixEntrySchema,
 )
 from app.services.run_service import RunService
 
@@ -18,70 +22,109 @@ router = APIRouter(prefix="/reports", tags=["reporting"])
 
 @router.get("/{run_id}", response_model=ReportResponse)
 def get_report(run_id: int, db: Session = Depends(get_db)):
-    """Get consolidated security assessment report for a run."""
-    # Get run
     run = RunService.get_run(db, run_id)
-    
-    # Get all correlated findings
-    correlated = (
-        db.query(CorrelatedFinding)
-        .filter(CorrelatedFinding.run_id == run_id)
+
+    matrix = (
+        db.query(SecurityMatrixEntry)
+        .filter(SecurityMatrixEntry.run_id == run_id)
         .all()
     )
-    
-    # Get all remediations
     remediations = (
-        db.query(Remediation)
-        .filter(Remediation.run_id == run_id)
-        .all()
+        db.query(Remediation).filter(Remediation.run_id == run_id).all()
     )
-    
-    # Get total findings
-    findings = db.query(Finding).filter(Finding.run_id == run_id).count()
-    
-    # Build correlated findings response
-    correlated_response = []
-    for cf in correlated:
-        finding = (
-            db.query(Finding).filter(Finding.id == cf.main_finding_id).first()
-        )
-        correlated_response.append(
-            CorrelatedFindingResponseSchema(
-                id=cf.id,
-                main_finding_id=cf.main_finding_id,
-                supporting_finding_ids=cf.supporting_finding_ids or [],
-                risk_score=cf.risk_score,
-                confidence=cf.confidence,
-                correlation_reason=cf.correlation_reason,
-                is_confirmed=cf.is_confirmed,
-                finding_title=finding.title if finding else None,
-                finding_severity=finding.severity if finding else None,
-            )
-        )
-    
-    # Build remediations response
-    remediations_response = [
-        RemediationResponseSchema(
-            id=r.id,
-            summary=r.summary,
-            priority_action=r.priority_action,
-            why_it_matters=r.why_it_matters,
-            example_fix=r.example_fix,
-            confidence=r.confidence,
-            source=r.source,
-        )
-        for r in remediations
-    ]
-    
+    trivy_count = (
+        db.query(TrivyFinding).filter(TrivyFinding.run_id == run_id).count()
+    )
+    art_count = (
+        db.query(ARTTestResult).filter(ARTTestResult.run_id == run_id).count()
+    )
+
     return ReportResponse(
         run_id=run.id,
         project_name=run.project_name,
         image_tag=run.image_tag,
         status=run.status,
-        findings_count=findings,
-        correlated_findings_count=len(correlated),
+        trivy_findings_count=trivy_count,
+        art_tests_count=art_count,
         remediations_count=len(remediations),
-        correlated_findings=correlated_response,
-        remediations=remediations_response,
+        security_matrix=[SecurityMatrixEntrySchema.model_validate(e) for e in matrix],
+        remediations=[RemediationResponseSchema.model_validate(r) for r in remediations],
         created_at=run.created_at,
     )
+
+
+@router.get("/{run_id}/export")
+def export_report(
+    run_id: int,
+    format: str = Query(default="json", pattern="^(json|csv|pdf)$"),
+    db: Session = Depends(get_db),
+):
+    run = RunService.get_run(db, run_id)
+    matrix = (
+        db.query(SecurityMatrixEntry)
+        .filter(SecurityMatrixEntry.run_id == run_id)
+        .all()
+    )
+
+    if format == "json":
+        # Reuse the standard report endpoint
+        from fastapi.encoders import jsonable_encoder
+        report = get_report(run_id, db)
+        return jsonable_encoder(report)
+
+    if format == "csv":
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(
+            ["entry_id", "mitre_tactic_id", "is_present", "is_exploitable",
+             "is_detectable", "risk_score", "finding_id", "test_result_id"]
+        )
+        for e in matrix:
+            writer.writerow([
+                e.entry_id, e.mitre_tactic_id, e.is_present, e.is_exploitable,
+                e.is_detectable, e.risk_score, e.finding_id, e.test_result_id,
+            ])
+        buf.seek(0)
+        return StreamingResponse(
+            iter([buf.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=vulbox-report-{run_id}.csv"},
+        )
+
+    if format == "pdf":
+        html = _render_pdf_html(run, matrix)
+        try:
+            import weasyprint
+            pdf_bytes = weasyprint.HTML(string=html).write_pdf()
+            return Response(
+                content=pdf_bytes,
+                media_type="application/pdf",
+                headers={"Content-Disposition": f"attachment; filename=vulbox-report-{run_id}.pdf"},
+            )
+        except ImportError:
+            return Response(
+                content="PDF export requires weasyprint. Install it with: pip install weasyprint",
+                status_code=501,
+                media_type="text/plain",
+            )
+
+
+def _render_pdf_html(run, matrix) -> str:
+    rows = "".join(
+        f"<tr><td>{e.mitre_tactic_id}</td><td>{'Yes' if e.is_present else 'No'}</td>"
+        f"<td>{'Yes' if e.is_exploitable else 'No'}</td>"
+        f"<td>{'Yes' if e.is_detectable else 'No'}</td><td>{e.risk_score}</td></tr>"
+        for e in matrix
+    )
+    return f"""<!DOCTYPE html><html><head><style>
+    body {{ font-family: sans-serif; margin: 2rem; }}
+    h1 {{ color: #0f172a; }} table {{ border-collapse: collapse; width: 100%; }}
+    th, td {{ border: 1px solid #ccc; padding: 0.5rem; text-align: left; }}
+    th {{ background: #0f172a; color: white; }}
+    </style></head><body>
+    <h1>VulBox Security Report — {run.project_name}</h1>
+    <p>Run ID: {run.id} | Status: {run.status} | Image: {run.image_tag}</p>
+    <h2>Security Matrix</h2>
+    <table><tr><th>MITRE Tactic</th><th>Present</th><th>Exploitable</th>
+    <th>Detectable</th><th>Risk Score</th></tr>{rows}</table>
+    </body></html>"""

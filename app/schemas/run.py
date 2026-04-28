@@ -10,9 +10,7 @@ class RunCreate(BaseModel):
     commit_sha: str = ""
     image_name: str = ""
     image_tag: str = "latest"
-    source_type: str = "repo"
-    triggered_by: str = "manual"
-    llm_remediation_enabled: bool = False
+    consent_granted: bool = False
 
 
 class RunUpdate(BaseModel):
@@ -27,12 +25,11 @@ class RunResponse(BaseModel):
     commit_sha: str
     image_name: str
     image_tag: str
-    source_type: str
     status: str
-    triggered_by: str
-    llm_remediation_enabled: bool
+    submitted_by: str
+    consent_granted: bool
     started_at: datetime
-    finished_at: datetime | None
+    completed_at: datetime | None
     created_at: datetime
 
     class Config:

@@ -1,0 +1,22 @@
+# Intentionally vulnerable demo app for testing VulBox's detection capabilities.
+# Uses an old base image with known CVEs and a simple Python HTTP server.
+# DO NOT use in production.
+FROM python:3.9
+
+WORKDIR /app
+
+# Intentionally outdated packages for CVE demonstration
+RUN pip install flask==1.1.2 requests==2.25.1 pillow==8.1.0
+
+COPY --from=scratch /dev/null /app/placeholder
+
+ENV FLASK_APP=server.py
+ENV FLASK_ENV=development
+
+RUN echo 'from flask import Flask; app = Flask(__name__)\n\
+@app.route("/")\ndef index(): return "Vulnerable demo app"\n\
+if __name__ == "__main__": app.run(host="0.0.0.0", port=5000)' > server.py
+
+EXPOSE 5000
+
+CMD ["python", "server.py"]

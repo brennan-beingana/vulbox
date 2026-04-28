@@ -1,35 +1,25 @@
-import { useEffect, useState } from "react";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import Login from "./pages/Login";
+import Register from "./pages/Register";
+import NewRun from "./pages/NewRun";
+import RunStatus from "./pages/RunStatus";
+import Report from "./pages/Report";
 
-const API_BASE = "http://127.0.0.1:8000";
+function RequireAuth({ children }) {
+  return localStorage.getItem("token") ? children : <Navigate to="/login" replace />;
+}
 
 export default function App() {
-  const [health, setHealth] = useState("checking");
-
-  useEffect(() => {
-    fetch(`${API_BASE}/health`)
-      .then((res) => res.json())
-      .then((data) => setHealth(data.status || "unknown"))
-      .catch(() => setHealth("offline"));
-  }, []);
-
   return (
-    <main className="page">
-      <section className="hero">
-        <h1>VulBox</h1>
-        <p>Automated security assessment pipeline for containerized apps.</p>
-      </section>
-      <section className="card">
-        <h2>Backend Health</h2>
-        <p>Status: {health}</p>
-      </section>
-      <section className="card">
-        <h2>Next Build Targets</h2>
-        <ul>
-          <li>Create run workflow form</li>
-          <li>Ingest Trivy and Falco results</li>
-          <li>Correlated findings board</li>
-        </ul>
-      </section>
-    </main>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/" element={<RequireAuth><NewRun /></RequireAuth>} />
+        <Route path="/runs/:runId/status" element={<RequireAuth><RunStatus /></RequireAuth>} />
+        <Route path="/runs/:runId/report" element={<RequireAuth><Report /></RequireAuth>} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }

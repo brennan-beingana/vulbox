@@ -4,8 +4,34 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 
+class TrivyFindingSchema(BaseModel):
+    finding_id: int
+    cve_id: str
+    severity: str
+    package_name: str
+    fix_available: bool
+
+    class Config:
+        from_attributes = True
+
+
+class SecurityMatrixEntrySchema(BaseModel):
+    entry_id: int
+    finding_id: Optional[int]
+    test_result_id: Optional[int]
+    is_present: bool
+    is_exploitable: bool
+    is_detectable: bool
+    mitre_tactic_id: str
+    risk_score: int
+
+    class Config:
+        from_attributes = True
+
+
 class RemediationResponseSchema(BaseModel):
     id: int
+    matrix_entry_id: int
     summary: str
     priority_action: str
     why_it_matters: str
@@ -13,17 +39,19 @@ class RemediationResponseSchema(BaseModel):
     confidence: str
     source: str
 
+    class Config:
+        from_attributes = True
 
-class CorrelatedFindingResponseSchema(BaseModel):
-    id: int
-    main_finding_id: int
-    supporting_finding_ids: List[int]
-    risk_score: int
-    confidence: str
-    correlation_reason: str
-    is_confirmed: bool
-    finding_title: Optional[str] = None
-    finding_severity: Optional[str] = None
+
+class ARTTestResultSchema(BaseModel):
+    test_result_id: int
+    mitre_test_id: str
+    exploited: bool
+    crash_occurred: bool
+    executed_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class ReportResponse(BaseModel):
@@ -31,9 +59,9 @@ class ReportResponse(BaseModel):
     project_name: str
     image_tag: str
     status: str
-    findings_count: int
-    correlated_findings_count: int
+    trivy_findings_count: int
+    art_tests_count: int
     remediations_count: int
-    correlated_findings: List[CorrelatedFindingResponseSchema]
+    security_matrix: List[SecurityMatrixEntrySchema]
     remediations: List[RemediationResponseSchema]
     created_at: datetime
