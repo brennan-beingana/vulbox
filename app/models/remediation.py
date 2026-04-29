@@ -20,4 +20,7 @@ class Remediation(Base):
     example_fix: Mapped[str] = mapped_column(String(1000), default="")
     confidence: Mapped[str] = mapped_column(String(20), default="medium")
     source: Mapped[str] = mapped_column(String(100), default="rule-based")
+    # "static" (rule-based) or "llm" — drives UI badge in the Report screen.
+    generated_by: Mapped[str] = mapped_column(String(20), default="static")
+    references: Mapped[str] = mapped_column(String(2000), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

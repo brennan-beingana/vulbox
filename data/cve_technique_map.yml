@@ -1,0 +1,208 @@
+# CVE → MITRE ATT&CK technique mapping.
+#
+# Used by app.adapters.art_adapter.ARTAdapter to translate Trivy CVE findings
+# into the adversarial techniques worth running against the sandbox. Each
+# mapping is a known-exploited or well-documented association between a CVE
+# and a primary post-exploitation behaviour, drawn from MITRE ATT&CK technique
+# pages and the CISA Known Exploited Vulnerabilities catalogue.
+#
+# The map is consulted in CVE-priority order: a Trivy finding whose cve_id
+# appears here adds the corresponding technique to the front of the ART queue
+# and contributes its finding_id to the resulting SecurityMatrixEntry, so the
+# downstream remediation engine can correlate the test back to the CVE that
+# motivated it.
+#
+# To extend: add a `cve` (string) and `technique` (MITRE ID); optionally a
+# one-line `notes` field documenting the rationale. Keep entries sorted by
+# technique to make duplicate-detection by humans easy.
+
+mappings:
+
+  # T1059 / T1059.004 — Command and Scripting Interpreter (Unix Shell)
+  - cve: CVE-2014-6271        # Shellshock
+    technique: T1059.004
+    notes: Bash environment-variable parsing RCE; trivial shell injection.
+  - cve: CVE-2021-44228        # Log4Shell
+    technique: T1059
+    notes: JNDI lookup → RCE in Java applications.
+  - cve: CVE-2021-45046        # Log4j follow-up
+    technique: T1059
+  - cve: CVE-2022-22965        # Spring4Shell
+    technique: T1059
+    notes: Spring Framework data-binding RCE.
+  - cve: CVE-2017-5638         # Apache Struts Jakarta parser RCE
+    technique: T1059
+  - cve: CVE-2018-11776        # Struts OGNL
+    technique: T1059
+  - cve: CVE-2022-26134        # Confluence OGNL injection
+    technique: T1059
+  - cve: CVE-2019-11581        # Atlassian Jira template injection
+    technique: T1059
+  - cve: CVE-2017-12149        # JBoss Application Server RCE
+    technique: T1059
+  - cve: CVE-2020-14882        # WebLogic RCE
+    technique: T1059
+  - cve: CVE-2023-23397        # Outlook NTLM (auth + script context)
+    technique: T1059
+
+  # T1068 — Privilege Escalation
+  - cve: CVE-2021-4034         # PwnKit / pkexec
+    technique: T1068
+    notes: Polkit local privesc to root.
+  - cve: CVE-2022-0847         # Dirty Pipe
+    technique: T1068
+  - cve: CVE-2016-5195         # Dirty COW
+    technique: T1068
+  - cve: CVE-2017-1000112      # Linux UDP fragmentation privesc
+    technique: T1068
+  - cve: CVE-2017-7494         # Samba is_known_pipename
+    technique: T1068
+  - cve: CVE-2021-3156         # sudo Baron Samedit
+    technique: T1068
+    notes: Heap overflow in sudoedit → root.
+  - cve: CVE-2023-32233        # Linux nf_tables UAF
+    technique: T1068
+  - cve: CVE-2024-1086         # nf_tables double-free
+    technique: T1068
+  - cve: CVE-2023-2640         # Ubuntu OverlayFS privesc
+    technique: T1068
+  - cve: CVE-2023-32629        # Ubuntu GameOver(lay)
+    technique: T1068
+  - cve: CVE-2022-2588         # cls_route UAF
+    technique: T1068
+
+  # T1611 — Escape to Host (container escape / hypervisor escape)
+  - cve: CVE-2019-5736         # runc host overwrite
+    technique: T1611
+    notes: Overwrite /proc/self/exe to clobber host runc binary.
+  - cve: CVE-2020-15257        # containerd-shim API
+    technique: T1611
+  - cve: CVE-2022-0185         # fs_context heap overflow → container escape
+    technique: T1611
+  - cve: CVE-2024-21626        # runc /proc fd leak escape
+    technique: T1611
+  - cve: CVE-2022-23648        # containerd CRI absolute symlink
+    technique: T1611
+  - cve: CVE-2019-14271        # docker cp libnss escape
+    technique: T1611
+
+  # T1190 — Exploit Public-Facing Application
+  - cve: CVE-2014-0160         # Heartbleed
+    technique: T1190
+  - cve: CVE-2019-19781        # Citrix ADC path traversal
+    technique: T1190
+  - cve: CVE-2021-26855        # Exchange ProxyLogon
+    technique: T1190
+  - cve: CVE-2021-34473        # Exchange ProxyShell
+    technique: T1190
+  - cve: CVE-2021-40539        # ManageEngine ADSelfService Plus
+    technique: T1190
+  - cve: CVE-2022-1388         # F5 BIG-IP iControl
+    technique: T1190
+  - cve: CVE-2023-46604        # ActiveMQ OpenWire RCE
+    technique: T1190
+  - cve: CVE-2023-22515        # Confluence broken access control
+    technique: T1190
+  - cve: CVE-2023-34362        # MOVEit Transfer SQLi
+    technique: T1190
+  - cve: CVE-2023-3519         # Citrix NetScaler RCE
+    technique: T1190
+  - cve: CVE-2024-3400         # PAN-OS GlobalProtect command injection
+    technique: T1190
+  - cve: CVE-2024-21887        # Ivanti Connect Secure command injection
+    technique: T1190
+
+  # T1543 / T1543.002 — Persistence via systemd / service
+  - cve: CVE-2018-15686        # systemd PID1 alloca
+    technique: T1543.002
+  - cve: CVE-2021-33910        # systemd assert via long mount
+    technique: T1543.002
+
+  # T1552 / T1552.001 — Credentials in Files
+  - cve: CVE-2017-1000367      # sudo tty hijack → cred read
+    technique: T1552.001
+  - cve: CVE-2019-3462         # apt MITM cred-bearing lists
+    technique: T1552.001
+  - cve: CVE-2021-3711         # OpenSSL SM2 buffer overflow (key material context)
+    technique: T1552.001
+
+  # T1557 — Adversary-in-the-Middle / TLS issues
+  - cve: CVE-2014-3566         # POODLE
+    technique: T1557
+  - cve: CVE-2016-2183         # SWEET32
+    technique: T1557
+
+  # T1003 — OS Credential Dumping
+  - cve: CVE-2020-1472         # Zerologon
+    technique: T1003
+  - cve: CVE-2022-21907        # http.sys (also lateral)
+    technique: T1003
+
+  # T1210 — Exploitation of Remote Services (lateral movement)
+  - cve: CVE-2017-0144         # EternalBlue / SMBv1
+    technique: T1210
+  - cve: CVE-2017-0145         # EternalRomance
+    technique: T1210
+  - cve: CVE-2019-0708         # BlueKeep / RDP
+    technique: T1210
+  - cve: CVE-2020-0796         # SMBGhost
+    technique: T1210
+
+  # T1082 — System Information Discovery (catch-all when no CVE-specific signal)
+  # Intentionally none — used as fallback only.
+
+  # T1574 — Hijack Execution Flow (DLL / library hijacks, library path tampering)
+  - cve: CVE-2023-4911         # glibc Looney Tunables
+    technique: T1574
+  - cve: CVE-2018-1000001      # glibc realpath buffer underflow
+    technique: T1574
+
+# --------------------------------------------------------------------------
+# Heuristic fallbacks. When none of the above CVEs match, the adapter
+# inspects the Trivy findings and adds techniques whose preconditions look
+# satisfied. Each rule fires independently; order in the resulting queue is
+# the order listed here.
+#
+#   match.severity_min  — fires only if at least one finding has severity ≥ N
+#                         (critical=4, high=3, medium=2, low=1)
+#   match.keywords      — fires if any finding's package_name OR description
+#                         (case-insensitive) contains any keyword
+#   match.always        — always fires (use sparingly)
+#
+# Used by ARTAdapter.build_queue when CVE-driven matches < 2.
+fallbacks:
+
+  - technique: T1082
+    match: { always: true }
+    notes: Discovery — establishes the baseline (every image yields at least one positive on /etc enumeration).
+
+  - technique: T1059.004
+    match:
+      keywords: [bash, sh, dash, busybox, php, python, perl, ruby, node, apache, nginx]
+    notes: Shell-availability is the precondition for command execution; fires on any image with an interpreter package.
+
+  - technique: T1068
+    match:
+      severity_min: high
+      keywords: [kernel, sudo, polkit, pkexec, util-linux, glibc, libc6]
+    notes: Privesc only meaningful when a high-severity package is present.
+
+  - technique: T1611
+    match:
+      keywords: [runc, containerd, docker, kubelet, kube-, libcap, capsh]
+    notes: Container-escape probes are only worth running against container-runtime components.
+
+  - technique: T1190
+    match:
+      keywords: [apache, nginx, httpd, tomcat, jetty, wildfly, php, fpm, node, express, gunicorn, struts, spring, log4j]
+    notes: Public-facing app exploit only relevant for HTTP/web stack images.
+
+  - technique: T1543.002
+    match:
+      keywords: [systemd, init, openrc, supervisord]
+    notes: Persistence via service unit only succeeds where an init system is present.
+
+  - technique: T1552.001
+    match:
+      severity_min: medium
+    notes: Credential-files sweep is cheap and useful on any non-trivial image.

@@ -57,6 +57,7 @@ class RemediationService:
                 example_fix=example,
                 confidence=confidence,
                 source="rule-based",
+                generated_by="static",
             )
             db.add(rem)
             remediations.append(rem)

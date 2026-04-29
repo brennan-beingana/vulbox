@@ -17,5 +17,16 @@ class Settings(BaseModel):
     dev_mode: bool = os.getenv("VULBOX_DEV_MODE", "true").lower() == "true"
     project_root: Path = PROJECT_ROOT
 
+    # LLM remediation (Anthropic). Disabled by default so the demo path keeps
+    # working without an API key; enable with VULBOX_LLM_REMEDIATION=true.
+    llm_remediation_enabled: bool = (
+        os.getenv("VULBOX_LLM_REMEDIATION", "false").lower() == "true"
+    )
+    anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
+    llm_model: str = os.getenv("VULBOX_LLM_MODEL", "claude-haiku-4-5-20251001")
+    llm_min_risk_score: int = int(os.getenv("VULBOX_LLM_MIN_RISK_SCORE", "20"))
+    llm_timeout_secs: int = int(os.getenv("VULBOX_LLM_TIMEOUT_SECS", "30"))
+    llm_max_tokens: int = int(os.getenv("VULBOX_LLM_MAX_TOKENS", "1024"))
+
 
 settings = Settings()

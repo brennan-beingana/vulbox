@@ -38,6 +38,8 @@ class RemediationResponseSchema(BaseModel):
     example_fix: str
     confidence: str
     source: str
+    generated_by: str = "static"
+    references: str = ""
 
     class Config:
         from_attributes = True

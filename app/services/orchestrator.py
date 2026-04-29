@@ -25,6 +25,7 @@ from app.models.run import AssessmentRun
 from app.models.security_matrix_entry import SecurityMatrixEntry
 from app.models.trivy_finding import TrivyFinding
 from app.services.docker_manager import BuildFailedError, DockerManager, SandboxNotRunningError
+from app.services.llm_remediation import LLMRemediationService
 from app.services.remediation_service import RemediationService
 
 logger = get_logger(__name__)
@@ -318,7 +319,12 @@ async def _phase_report(run: AssessmentRun, db: Session) -> None:
     _set_status(db, run, "REPORTING")
     _push_event(run.id, {"event": "phase", "phase": "REPORTING"})
 
-    await asyncio.to_thread(RemediationService.generate_remediations, db, run.id)
+    # LLM remediation falls back to RemediationService internally if the API
+    # key is missing or the call fails, so this single path covers both modes.
+    if LLMRemediationService.is_enabled():
+        await asyncio.to_thread(LLMRemediationService.generate_remediations, db, run.id)
+    else:
+        await asyncio.to_thread(RemediationService.generate_remediations, db, run.id)
 
     _set_status(db, run, "COMPLETE")
     _push_event(run.id, {"event": "complete"})
