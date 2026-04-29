@@ -24,7 +24,7 @@ async def create_run(
         )
 
     run = RunService.create_run(db, payload)
-    background_tasks.add_task(start_assessment, run.id, db)
+    background_tasks.add_task(start_assessment, run.id)
     return run
 
 

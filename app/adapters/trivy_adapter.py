@@ -9,7 +9,7 @@ from app.models.trivy_finding import TrivyFinding
 
 logger = get_logger(__name__)
 
-_DEV_FIXTURE = Path("data/sample_outputs/trivy-fixture.json")
+_DEV_FIXTURE = settings.project_root / "data" / "sample_outputs" / "trivy-fixture.json"
 
 # Mapping of Trivy severity strings to normalised lowercase values
 _SEVERITY_MAP = {

@@ -1,6 +1,10 @@
 import os
+from pathlib import Path
 
 from pydantic import BaseModel
+
+# Project root: parents[2] = <repo>/ since this file is <repo>/app/core/config.py
+PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseModel):
@@ -11,6 +15,7 @@ class Settings(BaseModel):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24  # 24 hours
     dev_mode: bool = os.getenv("VULBOX_DEV_MODE", "true").lower() == "true"
+    project_root: Path = PROJECT_ROOT
 
 
 settings = Settings()

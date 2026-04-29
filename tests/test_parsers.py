@@ -45,7 +45,14 @@ def test_art_adapter_builds_queue():
     findings = [TrivyFinding(run_id=1, cve_id="CVE-2021-4034", severity="critical", package_name="pkexec")]
     queue = ARTAdapter.build_queue(findings)
     assert len(queue) > 0
-    assert all(isinstance(t, str) for t in queue)
+    # New contract: list of (technique_id, motivating_finding_id|None) tuples.
+    assert all(
+        isinstance(item, tuple)
+        and len(item) == 2
+        and isinstance(item[0], str)
+        and (item[1] is None or isinstance(item[1], int))
+        for item in queue
+    )
 
 
 def test_art_adapter_executes_test_from_fixture():
