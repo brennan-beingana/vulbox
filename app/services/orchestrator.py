@@ -24,7 +24,7 @@ from app.models.art_test_result import ARTTestResult
 from app.models.run import AssessmentRun
 from app.models.security_matrix_entry import SecurityMatrixEntry
 from app.models.trivy_finding import TrivyFinding
-from app.services.docker_manager import BuildFailedError, DockerManager
+from app.services.docker_manager import BuildFailedError, DockerManager, SandboxNotRunningError
 from app.services.remediation_service import RemediationService
 
 logger = get_logger(__name__)
@@ -146,6 +146,9 @@ async def start_assessment(run_id: int) -> None:
     except BuildFailedError as exc:
         failure_reason = f"build failed: {exc}"
         logger.error(failure_reason, extra={"run_id": run_id})
+    except SandboxNotRunningError as exc:
+        failure_reason = f"sandbox failed to stay running: {exc}"
+        logger.error(failure_reason, extra={"run_id": run_id})
     except Exception as exc:  # noqa: BLE001 — top-level guard
         failure_reason = f"{type(exc).__name__}: {exc}"
         logger.exception("Unexpected error in pipeline", extra={"run_id": run_id})
@@ -215,6 +218,9 @@ async def _phase_deploy_sandbox(
     container_id = await asyncio.to_thread(
         DockerManager.run_sandbox, image_tag, run_id, sandbox_cfg
     )
+    # Fail fast if the image's entrypoint exited immediately — testing a dead
+    # container produces meaningless results.
+    await asyncio.to_thread(DockerManager.assert_running, container_id)
     await asyncio.to_thread(FalcoAdapter.attach, container_id, run_id)
     return container_id
 
@@ -237,7 +243,7 @@ async def _phase_test_loop(
         _push_event(run.id, {"event": "test_start", "test_id": test_id})
 
         test_result: ARTTestResult = await asyncio.to_thread(
-            ARTAdapter.execute_test, test_id, run.id
+            ARTAdapter.execute_test, test_id, run.id, container_id
         )
 
         if test_result.crash_occurred:
@@ -260,6 +266,7 @@ async def _phase_test_loop(
                 run.id,
                 sandbox_cfg,
             )
+            await asyncio.to_thread(DockerManager.assert_running, container_id)
             _set_status(db, run, "TESTING")
             continue
 

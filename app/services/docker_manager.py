@@ -15,6 +15,16 @@ class BuildFailedError(Exception):
     pass
 
 
+class SandboxNotRunningError(RuntimeError):
+    """Raised when the sandbox container is not in 'running' state.
+
+    Common cause: the target image's entrypoint exited immediately because
+    --network none / --read-only / no port broke its startup. Without this
+    check, the orchestrator runs ART tests against a corpse and reports
+    nonsense results.
+    """
+
+
 # Default sandbox config used when a repo has no .vulbox.yml.
 _DEFAULT_SANDBOX_CONFIG: Dict[str, Any] = {
     "network": "none",       # "none" | "bridge"
@@ -163,6 +173,41 @@ class DockerManager:
             return "dev-container-id-rebuilt"
         DockerManager.destroy_sandbox(container_id)
         return DockerManager.run_sandbox(image_tag, run_id, config=config)
+
+    @staticmethod
+    def assert_running(container_id: str, settle_secs: float = 1.5) -> None:
+        """Verify the sandbox is still 'running' after a brief settle.
+
+        Brief sleep gives the container time to either fully boot or crash;
+        without it, an immediate-exit image looks running for milliseconds.
+        Raises SandboxNotRunningError with the docker-side state and the
+        first 40 lines of container logs if it isn't.
+        """
+        if settings.dev_mode:
+            return
+        import time
+        time.sleep(settle_secs)
+
+        inspect = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Status}}|{{.State.ExitCode}}|{{.State.Error}}", container_id],
+            capture_output=True, text=True, timeout=10,
+        )
+        if inspect.returncode != 0:
+            raise SandboxNotRunningError(
+                f"docker inspect failed for {container_id}: {inspect.stderr.strip()}"
+            )
+        status, exit_code, err = (inspect.stdout.strip().split("|", 2) + ["", "", ""])[:3]
+        if status != "running":
+            tail = subprocess.run(
+                ["docker", "logs", "--tail", "40", container_id],
+                capture_output=True, text=True, timeout=10,
+            )
+            log_excerpt = (tail.stdout or "") + (tail.stderr or "")
+            raise SandboxNotRunningError(
+                f"sandbox {container_id[:12]} not running "
+                f"(state={status}, exit={exit_code}, err={err!r}). "
+                f"Last container output:\n{log_excerpt[:1500]}"
+            )
 
     @staticmethod
     def destroy_sandbox(container_id: str) -> None:

@@ -73,11 +73,17 @@ class ARTAdapter:
         return priority
 
     @staticmethod
-    def execute_test(test_id: str, run_id: int) -> ARTTestResult:
-        """Execute a single ART test and return an ARTTestResult (not yet persisted)."""
+    def execute_test(
+        test_id: str, run_id: int, container_id: Optional[str] = None
+    ) -> ARTTestResult:
+        """Execute a single ART test and return an ARTTestResult (not yet persisted).
+
+        ``container_id`` is the live sandbox to exec into. Optional for back-compat
+        and dev mode (which reads fixtures and never spawns a container).
+        """
         if settings.dev_mode:
             return ARTAdapter._fixture_result(test_id, run_id)
-        return ARTAdapter._run_atomic(test_id, run_id)
+        return ARTAdapter._run_atomic(test_id, run_id, container_id)
 
     @staticmethod
     def _fixture_result(test_id: str, run_id: int) -> ARTTestResult:
@@ -101,17 +107,28 @@ class ARTAdapter:
         )
 
     @staticmethod
-    def _run_atomic(test_id: str, run_id: int) -> ARTTestResult:
+    def _run_atomic(
+        test_id: str, run_id: int, container_id: Optional[str] = None
+    ) -> ARTTestResult:
         log_path = (
             settings.project_root / "data" / "runs" / str(run_id) / "logs" / f"art-{test_id}.log"
         )
         log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        runner = settings.project_root / "scanners" / "atomic_runner.sh"
+        env = {
+            "ATOMIC_CONSENT": "true",
+            "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        }
+        if container_id:
+            env["VULBOX_SANDBOX_CONTAINER"] = container_id
+
         result = subprocess.run(
-            ["bash", "scanners/atomic_runner.sh", test_id],
+            ["bash", str(runner), test_id],
             capture_output=True,
             text=True,
             timeout=120,
-            env={"ATOMIC_CONSENT": "true"},
+            env=env,
         )
         try:
             log_path.write_text(
