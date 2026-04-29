@@ -68,19 +68,19 @@ def test_cache_key_changes_on_technique():
 def test_is_enabled_off_when_no_api_key():
     with patch("app.services.llm_remediation.settings") as fake:
         fake.llm_remediation_enabled = True
-        fake.anthropic_api_key = ""
+        fake.openai_api_key = ""
         assert LLMRemediationService.is_enabled() is False
 
 
 def test_is_enabled_off_when_flag_off():
     with patch("app.services.llm_remediation.settings") as fake:
         fake.llm_remediation_enabled = False
-        fake.anthropic_api_key = "sk-..."
+        fake.openai_api_key = "sk-..."
         assert LLMRemediationService.is_enabled() is False
 
 
 def test_is_enabled_on_when_both_set():
     with patch("app.services.llm_remediation.settings") as fake:
         fake.llm_remediation_enabled = True
-        fake.anthropic_api_key = "sk-..."
+        fake.openai_api_key = "sk-..."
         assert LLMRemediationService.is_enabled() is True

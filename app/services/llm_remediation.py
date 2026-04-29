@@ -1,4 +1,4 @@
-"""LLM-driven remediation generation via the Anthropic API.
+"""LLM-driven remediation generation via the OpenAI API.
 
 Replaces the four canned rules in RemediationService with per-entry prompts
 that have access to the *evidence* — the ART log excerpt, the Falco alerts,
@@ -92,7 +92,7 @@ class LLMRemediationService:
 
     @staticmethod
     def is_enabled() -> bool:
-        return settings.llm_remediation_enabled and bool(settings.anthropic_api_key)
+        return settings.llm_remediation_enabled and bool(settings.openai_api_key)
 
     @staticmethod
     def generate_remediations(db: Session, run_id: int) -> List[Remediation]:
@@ -135,7 +135,7 @@ class LLMRemediationService:
         if cached is not None:
             payload = cached
         else:
-            payload = _call_anthropic(evidence)
+            payload = _call_openai(evidence)
             if payload is None:
                 return None
             _write_cache(evidence.cache_key(), payload)
@@ -149,7 +149,7 @@ class LLMRemediationService:
                 why_it_matters=str(payload["why_it_matters"])[:500],
                 example_fix=str(payload["example_fix"])[:1000],
                 confidence=str(payload.get("confidence", "medium")).lower(),
-                source=f"anthropic:{settings.llm_model}",
+                source=f"openai:{settings.llm_model}",
                 generated_by="llm",
                 references="\n".join(str(r) for r in (payload.get("references") or []))[:2000],
             )
@@ -252,32 +252,37 @@ def _build_static_remediation(
     )
 
 
-def _call_anthropic(evidence: _Evidence) -> Optional[dict]:
-    """Invoke claude-haiku and return parsed JSON, or None on any failure."""
+def _call_openai(evidence: _Evidence) -> Optional[dict]:
+    """Invoke gpt-4o-mini (or configured model) and return parsed JSON, or None on failure."""
     try:
-        import anthropic  # imported lazily so missing dep doesn't break dev mode
+        from openai import OpenAI  # imported lazily so missing dep doesn't break dev mode
     except ImportError:
-        logger.warning("anthropic SDK not installed; skipping LLM call")
+        logger.warning("openai SDK not installed; skipping LLM call")
         return None
 
     user_prompt = _format_prompt(evidence)
 
     try:
-        client = anthropic.Anthropic(
-            api_key=settings.anthropic_api_key,
+        client = OpenAI(
+            api_key=settings.openai_api_key,
             timeout=settings.llm_timeout_secs,
         )
-        msg = client.messages.create(
+        resp = client.chat.completions.create(
             model=settings.llm_model,
             max_tokens=settings.llm_max_tokens,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}],
+            # JSON mode guarantees a parseable object — system prompt still
+            # carries the schema description so the keys come out right.
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
         )
     except Exception as exc:  # noqa: BLE001 — broad on purpose; any error → fallback
-        logger.warning("Anthropic call failed", extra={"err": str(exc)})
+        logger.warning("OpenAI call failed", extra={"err": str(exc)})
         return None
 
-    raw = "".join(getattr(b, "text", "") for b in msg.content) if msg.content else ""
+    raw = (resp.choices[0].message.content or "") if resp.choices else ""
     parsed = _parse_json_response(raw)
     if parsed is None:
         logger.warning("LLM response was not valid JSON; falling back")
