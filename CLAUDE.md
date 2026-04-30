@@ -31,6 +31,8 @@ source venv/bin/activate
 pytest tests/
 ```
 
+**Test scope (important):** the pytest suite covers unit-level logic only — fixture parsers, correlation, risk-score arithmetic, remediation rendering, CVE-map loading, and LLM prompt construction (mocked client). It does **not** exercise the real Docker build, Trivy CLI, Falco ingestion, Atomic Red Team execution, or any end-to-end pipeline against a real repository. A green run proves parsing/scoring is internally consistent; it does not prove VulBox successfully assesses real targets. End-to-end validation must be done manually via `scripts/demo.py` (dev-mode) or a full-mode run on a host with Docker + Trivy + Falco installed.
+
 ### Frontend
 ```bash
 cd frontend

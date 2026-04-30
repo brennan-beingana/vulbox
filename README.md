@@ -36,6 +36,23 @@ Automated application security assessment prototype combining static scanning, r
 From the docker directory:
   docker compose up
 
+## Test scope
+
+The pytest suite (`tests/`) covers unit-level logic only:
+- Fixture parsers (Trivy, Falco, Atomic JSON shapes)
+- Correlation engine and risk-score arithmetic
+- Remediation rendering and CVE-map loading
+- LLM remediation prompt construction (mocked client)
+
+The suite does **not** exercise:
+- Docker image build or sandbox runtime
+- Real Trivy CLI invocation
+- Falco event ingestion from a live kernel
+- Atomic Red Team test execution
+- End-to-end pipeline against a real repository
+
+A green test run is evidence the parsing and scoring code is internally consistent. It is **not** evidence that VulBox successfully assesses real targets. Validation against real repositories must be done manually via `scripts/demo.py` (dev-mode, fixture-driven) or a full-mode run on the deployment VM with Docker, Trivy, and Falco installed.
+
 ## Next milestones
 1. Tool-specific ingestion endpoints (Trivy/Falco/Atomic)
 2. Correlation and risk scoring engine
