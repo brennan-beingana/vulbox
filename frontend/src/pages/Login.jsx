@@ -1,50 +1,92 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import axios from "axios";
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import api from '../api';
 
-const API = "http://46.101.193.155:8000";
+function ShieldIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </svg>
+  );
+}
 
 export default function Login() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const [form, setForm] = useState({ email: "", password: "" });
-  const [error, setError] = useState("");
 
   async function handleSubmit(e) {
     e.preventDefault();
-    setError("");
+    setError('');
+    setLoading(true);
     try {
-      const { data } = await axios.post(`${API}/auth/login`, form);
-      localStorage.setItem("token", data.access_token);
-      navigate("/");
+      const { data } = await api.post('/auth/login', { email, password });
+      localStorage.setItem('token', data.access_token);
+      navigate('/');
     } catch (err) {
-      setError(err.response?.data?.detail || "Login failed");
+      setError(err.response?.data?.detail || 'Invalid credentials. Please try again.');
+    } finally {
+      setLoading(false);
     }
   }
 
   return (
-    <main className="page auth-page">
+    <div className="auth-shell">
       <div className="auth-card">
-        <div className="hero" style={{ marginBottom: "1.5rem" }}>
-          <h1>VulBox</h1>
-          <p>Automated security assessment pipeline</p>
+        <div className="auth-logo">
+          <div className="auth-logo-icon">
+            <ShieldIcon />
+          </div>
+          <span className="auth-logo-name">VulBox</span>
         </div>
-        <div className="card">
-          <h2>Sign In</h2>
-          <form onSubmit={handleSubmit}>
-            <label>Email
-              <input type="email" value={form.email}
-                onChange={e => setForm({ ...form, email: e.target.value })} required />
-            </label>
-            <label>Password
-              <input type="password" value={form.password}
-                onChange={e => setForm({ ...form, password: e.target.value })} required />
-            </label>
-            {error && <p className="error">{error}</p>}
-            <button type="submit" className="btn-primary">Sign In</button>
-          </form>
-          <p className="auth-link">No account? <Link to="/register">Register</Link></p>
-        </div>
+
+        <h1 className="auth-heading">Welcome back</h1>
+        <p className="auth-subheading">Sign in to your security assessment workspace</p>
+
+        {error && <div className="alert alert-error">{error}</div>}
+
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="email">Email address</label>
+            <input
+              id="email"
+              className="form-input"
+              type="email"
+              placeholder="you@company.com"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              required
+              autoFocus
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="password">Password</label>
+            <input
+              id="password"
+              className="form-input"
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              required
+            />
+          </div>
+          <button
+            type="submit"
+            className="btn btn-primary btn-full mt-4"
+            disabled={loading}
+          >
+            {loading ? 'Signing in…' : 'Sign in'}
+          </button>
+        </form>
+
+        <p className="auth-footer">
+          Don&apos;t have an account?{' '}
+          <Link to="/register">Create one</Link>
+        </p>
       </div>
-    </main>
+    </div>
   );
 }
