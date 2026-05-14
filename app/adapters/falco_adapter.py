@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,14 @@ from app.models.falco_alert import FalcoAlert
 logger = get_logger(__name__)
 
 _DEV_FIXTURE = settings.project_root / "data" / "sample_outputs" / "falco-fixture.json"
+
+
+def _falco_enabled() -> bool:
+    # Opt-out toggle so production-mode runs on hosts without Falco (CI runners,
+    # dev laptops without kernel-module access) still complete instead of
+    # crashing in attach(). is_detectable becomes uniformly False on those
+    # runs — the Security Matrix still has signal from Trivy + ART.
+    return os.getenv("VULBOX_FALCO_ENABLED", "true").lower() == "true"
 
 _PRIORITY_MAP = {
     "Emergency": "critical",
@@ -42,6 +51,13 @@ class FalcoAdapter:
         if settings.dev_mode:
             logger.info(
                 "FalcoAdapter dev mode: skipping attach",
+                extra={"container_id": container_id, "run_id": run_id},
+            )
+            return
+
+        if not _falco_enabled():
+            logger.info(
+                "FalcoAdapter disabled via VULBOX_FALCO_ENABLED=false; skipping attach",
                 extra={"container_id": container_id, "run_id": run_id},
             )
             return
@@ -95,6 +111,8 @@ class FalcoAdapter:
         if settings.dev_mode:
             raw = json.loads(_DEV_FIXTURE.read_text())
             alerts_data = raw.get("alerts", [])
+        elif not _falco_enabled():
+            alerts_data = []
         else:
             alerts_data = FalcoAdapter._read_live_alerts(run_id, window_seconds)
 

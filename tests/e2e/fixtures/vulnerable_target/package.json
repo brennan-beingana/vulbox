@@ -1,0 +1,14 @@
+{
+  "name": "vulbox-e2e-vulnerable-target",
+  "version": "0.0.0",
+  "private": true,
+  "description": "INTENTIONALLY VULNERABLE — VulBox E2E test fixture. Do not deploy.",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "express": "4.16.0",
+    "lodash": "4.17.20"
+  }
+}
