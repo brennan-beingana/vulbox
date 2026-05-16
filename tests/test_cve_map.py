@@ -86,3 +86,33 @@ def test_two_different_images_get_different_queues():
     kernel_q = {t for t, _ in ART.ARTAdapter.build_queue(kernel_image)}
     # CVE-driven differ; otherwise the test below is meaningless.
     assert php_q != kernel_q
+
+
+def test_kev_flagged_cve_precedes_non_kev(monkeypatch):
+    """KEV-listed CVEs must outrank non-KEV CVE-driven matches.
+
+    Construct two findings that map to distinct techniques: one tagged KEV,
+    the other not. The KEV one must appear first regardless of input order.
+    """
+    monkeypatch.setitem(ART._CVE_METADATA, "CVE-TEST-KEV", {"kev": True})
+    monkeypatch.setitem(ART._CVE_METADATA, "CVE-TEST-PLAIN", {})
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-TEST-KEV", "T1190")
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-TEST-PLAIN", "T1003")
+
+    # Plain CVE appears first in the findings list — without prioritization
+    # it would come out first. The KEV flag should flip the order.
+    findings = [_f("CVE-TEST-PLAIN"), _f("CVE-TEST-KEV")]
+    techs = [t for t, _ in ART.ARTAdapter.build_queue(findings)]
+    assert techs.index("T1190") < techs.index("T1003")
+
+
+def test_ransomware_flagged_cve_precedes_kev_only(monkeypatch):
+    """Ransomware-linked CVEs outrank plain KEV entries."""
+    monkeypatch.setitem(ART._CVE_METADATA, "CVE-TEST-RANSOM", {"kev": True, "ransomware": True})
+    monkeypatch.setitem(ART._CVE_METADATA, "CVE-TEST-KEV", {"kev": True})
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-TEST-RANSOM", "T1486")
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-TEST-KEV", "T1190")
+
+    findings = [_f("CVE-TEST-KEV"), _f("CVE-TEST-RANSOM")]
+    techs = [t for t, _ in ART.ARTAdapter.build_queue(findings)]
+    assert techs.index("T1486") < techs.index("T1190")

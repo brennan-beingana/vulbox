@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -14,17 +15,73 @@ from app.models.trivy_finding import TrivyFinding
 logger = get_logger(__name__)
 
 _DEV_FIXTURE = settings.project_root / "data" / "sample_outputs" / "atomic-fixture.json"
-_TECHNIQUE_MAP_PATH = settings.project_root / "data" / "cve_technique_map.yml"
+_CURATED_MAP_PATH = settings.project_root / "data" / "cve_technique_map.yml"
+_GENERATED_MAP_PATH = settings.project_root / "data" / "cve_technique_map.generated.yml"
 
 _SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "unknown": 0}
 
 
-def _load_technique_map() -> Tuple[Dict[str, str], List[Dict[str, Any]]]:
-    """Parse data/cve_technique_map.yml into (cve→technique, fallbacks).
+def _ingest_mappings(
+    path: Path,
+    into: Dict[str, str],
+    meta: Dict[str, Dict[str, Any]],
+    *,
+    override: bool,
+) -> int:
+    """Load mappings from ``path`` into the ``into`` and ``meta`` dicts.
 
-    Missing/malformed file falls back to a tiny built-in seed so the adapter
-    still produces a sensible queue. Logged at warning level so a misnamed
-    file is visible.
+    ``into`` is the CVE→technique lookup the queue builder consults. ``meta``
+    carries side-channel flags (``kev``, ``ransomware``, ``provenance``) used
+    by ``build_queue`` to prioritize actively-exploited vulnerabilities ahead
+    of the long tail.
+
+    If ``override`` is False, the first technique seen for a CVE wins (within
+    a file, the build script orders entries so the primary impact appears
+    first). If True, later entries overwrite — used for the curated layer to
+    beat the generated bulk on conflict.
+    """
+    if not path.is_file():
+        return 0
+    try:
+        data = yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as exc:
+        logger.warning("Invalid CVE map", extra={"path": str(path), "err": str(exc)})
+        return 0
+    added = 0
+    for entry in data.get("mappings", []) or []:
+        cve = entry.get("cve")
+        tech = entry.get("technique")
+        if not (cve and tech):
+            continue
+        if override or cve not in into:
+            into[cve] = tech
+            added += 1
+        # Metadata flags merge regardless of override — they're additive
+        # (KEV-true never goes false on the same CVE).
+        m = meta.setdefault(cve, {})
+        if entry.get("kev"):
+            m["kev"] = True
+        if entry.get("ransomware"):
+            m["ransomware"] = True
+        if entry.get("provenance") and "provenance" not in m:
+            m["provenance"] = entry["provenance"]
+    return added
+
+
+def _load_technique_map() -> Tuple[
+    Dict[str, str], Dict[str, Dict[str, Any]], List[Dict[str, Any]]
+]:
+    """Merge generated + curated maps and side-channel CVE metadata.
+
+    Resolution order:
+      1. ``cve_technique_map.generated.yml`` — bulk auto-generated layer.
+      2. ``cve_technique_map.yml`` — curated layer; wins on conflict and
+         additionally supplies the heuristic fallback rules.
+
+    Returns (cve→technique, cve→metadata, fallbacks). Metadata carries
+    ``kev`` and ``ransomware`` flags consumed by ``build_queue`` for
+    priority ordering. If both files are missing/empty, a built-in seed
+    keeps the adapter usable so failed deploys don't blank out the queue.
     """
     seed_cve: Dict[str, str] = {
         "CVE-2021-4034": "T1068",
@@ -39,29 +96,47 @@ def _load_technique_map() -> Tuple[Dict[str, str], List[Dict[str, Any]]]:
         {"technique": "T1543.002", "match": {"always": True}},
         {"technique": "T1611", "match": {"always": True}},
     ]
-    if not _TECHNIQUE_MAP_PATH.is_file():
-        logger.warning("CVE map not found; using built-in seed", extra={"path": str(_TECHNIQUE_MAP_PATH)})
-        return seed_cve, seed_fb
-    try:
-        data = yaml.safe_load(_TECHNIQUE_MAP_PATH.read_text()) or {}
-    except yaml.YAMLError as exc:
-        logger.warning("Invalid cve_technique_map.yml; using seed", extra={"err": str(exc)})
-        return seed_cve, seed_fb
 
     cve_map: Dict[str, str] = {}
-    for entry in data.get("mappings", []) or []:
-        cve = entry.get("cve")
-        tech = entry.get("technique")
-        if cve and tech:
-            cve_map[cve] = tech
-    fallbacks = [fb for fb in (data.get("fallbacks", []) or []) if fb.get("technique")]
+    cve_meta: Dict[str, Dict[str, Any]] = {}
+    gen_count = _ingest_mappings(
+        _GENERATED_MAP_PATH, cve_map, cve_meta, override=False
+    )
+    cur_count = _ingest_mappings(
+        _CURATED_MAP_PATH, cve_map, cve_meta, override=True
+    )
+
+    fallbacks: List[Dict[str, Any]] = []
+    if _CURATED_MAP_PATH.is_file():
+        try:
+            data = yaml.safe_load(_CURATED_MAP_PATH.read_text()) or {}
+            fallbacks = [
+                fb for fb in (data.get("fallbacks", []) or []) if fb.get("technique")
+            ]
+        except yaml.YAMLError:
+            pass  # already logged in _ingest_mappings
+
     if not cve_map and not fallbacks:
-        logger.warning("Empty CVE map; using seed")
-        return seed_cve, seed_fb
-    return cve_map, fallbacks
+        logger.warning("No CVE map data; using built-in seed")
+        return seed_cve, {}, seed_fb
+
+    kev_count = sum(1 for m in cve_meta.values() if m.get("kev"))
+    ransomware_count = sum(1 for m in cve_meta.values() if m.get("ransomware"))
+    logger.info(
+        "CVE map loaded",
+        extra={
+            "generated_entries": gen_count,
+            "curated_entries": cur_count,
+            "total_cves": len(cve_map),
+            "kev_flagged": kev_count,
+            "ransomware_flagged": ransomware_count,
+            "fallbacks": len(fallbacks),
+        },
+    )
+    return cve_map, cve_meta, fallbacks
 
 
-_CVE_TECHNIQUE_MAP, _FALLBACK_RULES = _load_technique_map()
+_CVE_TECHNIQUE_MAP, _CVE_METADATA, _FALLBACK_RULES = _load_technique_map()
 
 
 def _fallback_matches(rule: Dict[str, Any], findings: List[TrivyFinding]) -> bool:
@@ -122,12 +197,29 @@ class ARTAdapter:
         priority: List[Tuple[str, Optional[int]]] = []
         seen_techniques: set = set()
 
-        # CVE-driven tests first.
-        for finding in trivy_findings:
+        # Collect CVE-driven matches with priority signals, then emit in order:
+        # ransomware-linked first, then KEV-listed, then everything else.
+        # Stable sort within each bucket preserves the order findings arrived.
+        cve_driven: List[Tuple[int, str, Optional[int]]] = []
+        for idx, finding in enumerate(trivy_findings):
             technique = _CVE_TECHNIQUE_MAP.get(finding.cve_id)
-            if technique and technique not in seen_techniques:
-                priority.append((technique, finding.finding_id))
-                seen_techniques.add(technique)
+            if not technique:
+                continue
+            meta = _CVE_METADATA.get(finding.cve_id, {})
+            # Lower tuple = higher priority.
+            rank = (
+                0 if meta.get("ransomware") else 1,
+                0 if meta.get("kev") else 1,
+                idx,
+            )
+            cve_driven.append((rank, technique, finding.finding_id))
+
+        cve_driven.sort(key=lambda x: x[0])
+        for _, technique, fid in cve_driven:
+            if technique in seen_techniques:
+                continue
+            priority.append((technique, fid))
+            seen_techniques.add(technique)
 
         # Heuristic fallbacks — fired by signal, not a fixed list.
         for rule in _FALLBACK_RULES:
@@ -183,16 +275,20 @@ class ARTAdapter:
         )
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        runner = settings.project_root / "scanners" / "atomic_runner.sh"
+        # Python runner first — covers the vendored ART catalog, and falls
+        # through to scanners/atomic_runner.sh for techniques the catalog
+        # can't serve (container-escape, systemd-write, etc.).
+        runner = settings.project_root / "scanners" / "atomic_runner.py"
         env = {
             "ATOMIC_CONSENT": "true",
             "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "PYTHONPATH": str(settings.project_root),
         }
         if container_id:
             env["VULBOX_SANDBOX_CONTAINER"] = container_id
 
         result = subprocess.run(
-            ["bash", str(runner), test_id],
+            [sys.executable, str(runner), test_id],
             capture_output=True,
             text=True,
             timeout=120,
@@ -200,7 +296,7 @@ class ARTAdapter:
         )
         try:
             log_path.write_text(
-                f"$ atomic_runner.sh {test_id}\n"
+                f"$ atomic_runner.py {test_id}\n"
                 f"--- exit: {result.returncode} ---\n"
                 f"--- stdout ---\n{result.stdout}\n"
                 f"--- stderr ---\n{result.stderr}\n"

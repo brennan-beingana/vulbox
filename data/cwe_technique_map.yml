@@ -1,0 +1,115 @@
+# CWE → MITRE ATT&CK technique bridge.
+#
+# Used by scripts/build_cve_map.py to map CISA KEV CVEs that aren't in the
+# attack_to_cve curated set. Each KEV entry carries one or more CWEs; the
+# bridge produces one (CVE → technique) row per CWE hit.
+#
+# Coverage target: the top 40 CWEs in KEV cover ~80% of the catalog. Adding
+# more is cheap — append entries and re-run the builder.
+#
+# Calls are conservative: ambiguous CWEs (e.g. CWE-20 "improper input
+# validation") map to the most-likely *exploitation* technique (T1190), not
+# the broadest possible post-exploitation behaviour. Refine via overrides in
+# cve_technique_map.yml when a specific CVE deserves better.
+
+mappings:
+
+  # --- Injection / RCE family ----------------------------------------------
+  - cwe: CWE-20      # Improper Input Validation (generic; usually network-exposed → exploit)
+    technique: T1190
+  - cwe: CWE-74      # Improper Neutralization of Special Elements
+    technique: T1059
+  - cwe: CWE-77      # Command Injection (generic)
+    technique: T1059
+  - cwe: CWE-78      # OS Command Injection
+    technique: T1059.004
+  - cwe: CWE-79      # Cross-Site Scripting
+    technique: T1059.007
+  - cwe: CWE-89      # SQL Injection
+    technique: T1190
+  - cwe: CWE-94      # Code Injection
+    technique: T1059
+  - cwe: CWE-95      # Eval Injection
+    technique: T1059
+  - cwe: CWE-138     # Improper Neutralization of Special Elements
+    technique: T1059
+  - cwe: CWE-434     # Unrestricted File Upload (typical foothold: web shell)
+    technique: T1505.003
+  - cwe: CWE-502     # Deserialization of Untrusted Data
+    technique: T1059
+  - cwe: CWE-611     # XML External Entity (XXE)
+    technique: T1190
+  - cwe: CWE-918     # Server-Side Request Forgery (SSRF)
+    technique: T1190
+
+  # --- Memory-safety → exploitation for code execution --------------------
+  - cwe: CWE-119     # Buffer Overflow (generic)
+    technique: T1203
+  - cwe: CWE-120     # Classic Buffer Overflow
+    technique: T1203
+  - cwe: CWE-121     # Stack-based Buffer Overflow
+    technique: T1203
+  - cwe: CWE-122     # Heap-based Buffer Overflow
+    technique: T1203
+  - cwe: CWE-125     # Out-of-bounds Read (mostly info leak)
+    technique: T1212
+  - cwe: CWE-190     # Integer Overflow
+    technique: T1203
+  - cwe: CWE-416     # Use After Free
+    technique: T1203
+  - cwe: CWE-787     # Out-of-bounds Write
+    technique: T1203
+  - cwe: CWE-843     # Type Confusion
+    technique: T1203
+
+  # --- Authentication / authorization → valid-accounts / privesc ----------
+  - cwe: CWE-264     # Permissions/Privileges/Access Controls (deprecated)
+    technique: T1068
+  - cwe: CWE-269     # Improper Privilege Management
+    technique: T1068
+  - cwe: CWE-284     # Improper Access Control
+    technique: T1078
+  - cwe: CWE-287     # Improper Authentication
+    technique: T1078
+  - cwe: CWE-288     # Authentication Bypass Using Alternate Path
+    technique: T1078
+  - cwe: CWE-306     # Missing Authentication for Critical Function
+    technique: T1078
+  - cwe: CWE-352     # Cross-Site Request Forgery
+    technique: T1606
+  - cwe: CWE-862     # Missing Authorization
+    technique: T1078
+  - cwe: CWE-863     # Incorrect Authorization
+    technique: T1078
+
+  # --- Path / file disclosure --------------------------------------------
+  - cwe: CWE-22      # Path Traversal
+    technique: T1083
+  - cwe: CWE-23      # Relative Path Traversal
+    technique: T1083
+  - cwe: CWE-59      # Link Following
+    technique: T1083
+  - cwe: CWE-200     # Information Exposure
+    technique: T1083
+  - cwe: CWE-209     # Information Exposure Through Error Message
+    technique: T1083
+
+  # --- Credentials --------------------------------------------------------
+  - cwe: CWE-798     # Use of Hard-coded Credentials
+    technique: T1552.001
+  - cwe: CWE-522     # Insufficiently Protected Credentials
+    technique: T1552.001
+
+  # --- Defense / protection failure → defense evasion ---------------------
+  - cwe: CWE-693     # Protection Mechanism Failure
+    technique: T1211
+  - cwe: CWE-506     # Embedded Malicious Code
+    technique: T1059
+
+  # --- Concurrency / DoS --------------------------------------------------
+  - cwe: CWE-362     # Race Condition (often leads to privesc)
+    technique: T1068
+  - cwe: CWE-399     # Resource Management Errors (deprecated; mostly DoS)
+    technique: T1499
+  - cwe: CWE-404     # Improper Resource Shutdown
+    technique: T1499
