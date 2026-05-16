@@ -1,0 +1,67 @@
+# Ground-truth corpus for the Sprint 6 E2E validation harness.
+#
+# Each case is a Docker image (pulled from a registry or built from a local
+# Dockerfile) plus expectations about what VulBox should produce for it.
+# scripts/validate_e2e.py reads this file, runs the pipeline against each
+# case, and emits docs/validation_report.md with the diff between expected
+# and actual.
+#
+# Field reference:
+#
+#   name          short slug; surfaces in the report and result filenames.
+#   image         image:tag passed to TrivyAdapter.scan().
+#   source        how to materialize the image: `registry` (docker pull) or
+#                 `dockerfile` (local build from `dockerfile_path`).
+#   description   human-readable note for the report.
+#   expectations  asserted by the harness:
+#     findings:
+#       min_total       at least this many Trivy findings overall.
+#       min_critical    at least this many CRITICAL severity findings.
+#       max_total       at most this many findings (control case).
+#       must_contain_cve   list of CVE ids that MUST appear.
+#     queue:
+#       must_include    list of techniques that MUST appear in build_queue().
+#       must_not_include  list that MUST NOT appear.
+
+cases:
+
+  # ---- Control: modern minimal image. Few CVEs expected. ------------------
+  - name: alpine-3-modern
+    image: alpine:3.20
+    source: registry
+    description: |
+      Modern Alpine. Control case: should produce a small finding set and
+      almost no critical-severity issues. Always-on T1082 should still queue.
+    expectations:
+      findings:
+        max_total: 30
+      queue:
+        must_include: [T1082]
+
+  # ---- Old base: many CVEs expected, multiple techniques queued. ----------
+  - name: alpine-3-5-legacy
+    image: alpine:3.5
+    source: registry
+    description: |
+      End-of-life Alpine 3.5. Should surface dozens of CVEs in musl, openssl,
+      busybox; queue should include the always-on discovery technique and
+      the shell-availability fallback.
+    expectations:
+      findings:
+        min_total: 10
+      queue:
+        must_include: [T1082, T1059.004]
+
+  # ---- Very old: stress case. --------------------------------------------
+  - name: debian-jessie-eol
+    image: debian:8
+    source: registry
+    description: |
+      Discontinued Debian 8 (Jessie). Wide-spread package vulnerabilities.
+      Useful upper bound: confirms the queue and report cope with large
+      finding sets without losing prioritization.
+    expectations:
+      findings:
+        min_total: 50
+      queue:
+        must_include: [T1082]
