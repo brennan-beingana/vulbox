@@ -17,16 +17,24 @@ class Settings(BaseModel):
     dev_mode: bool = os.getenv("VULBOX_DEV_MODE", "true").lower() == "true"
     project_root: Path = PROJECT_ROOT
 
-    # LLM remediation (OpenAI). Disabled by default so the demo path keeps
-    # working without an API key; enable with VULBOX_LLM_REMEDIATION=true.
+    # LLM remediation (Google Gemini). Disabled by default so the demo path
+    # keeps working without an API key; enable with VULBOX_LLM_REMEDIATION=true.
     llm_remediation_enabled: bool = (
         os.getenv("VULBOX_LLM_REMEDIATION", "false").lower() == "true"
     )
-    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
-    llm_model: str = os.getenv("VULBOX_LLM_MODEL", "gpt-4o-mini")
+    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
+    # One key, two models: primary serves every call; backup is the failover
+    # when the primary errors, rate-limits (429 RESOURCE_EXHAUSTED), or times out.
+    llm_model_primary: str = os.getenv("VULBOX_LLM_MODEL_PRIMARY", "gemini-2.5-flash")
+    llm_model_backup: str = os.getenv("VULBOX_LLM_MODEL_BACKUP", "gemini-2.5-flash-lite")
     llm_min_risk_score: int = int(os.getenv("VULBOX_LLM_MIN_RISK_SCORE", "20"))
     llm_timeout_secs: int = int(os.getenv("VULBOX_LLM_TIMEOUT_SECS", "30"))
     llm_max_tokens: int = int(os.getenv("VULBOX_LLM_MAX_TOKENS", "1024"))
+    # Run-level executive summary: one extra Gemini call synthesising all
+    # findings into a prioritised narrative. Falls back to a templated summary.
+    llm_exec_summary_enabled: bool = (
+        os.getenv("VULBOX_LLM_EXEC_SUMMARY", "true").lower() == "true"
+    )
 
 
 settings = Settings()

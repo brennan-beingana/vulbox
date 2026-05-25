@@ -39,7 +39,7 @@ The three adapters (`TrivyAdapter`, `FalcoAdapter`, `ARTAdapter`) branch on `VUL
 
 ### 3.2 LLM remediation → static-rule fallback
 
-`app/services/llm_remediation.py` calls OpenAI with prompt-cache-friendly inputs and parses JSON with markdown-fence stripping. If the API key is missing, the flag is off, the call errors, JSON parsing fails, or required fields are missing, it falls back to one of **four static rules** keyed only on `(exploited, detectable)`. That fallback ships a coherent remediation — but every Critical finding gets the same text. The LLM path itself has never been validated against a golden-set; we know it produces *plausible* output, not that it produces *useful* output.
+`app/services/llm_remediation.py` calls Google Gemini (primary `gemini-2.5-flash` → backup `gemini-2.5-flash-lite`, failover owned by `llm_provider.py`) with prompt-cache-friendly inputs and parses JSON with markdown-fence stripping. If the API key is missing, the flag is off, both models error, JSON parsing fails, or required fields are missing, it falls back to one of **four static rules** keyed only on `(exploited, detectable)`. A run-level executive summary (`run_summary_service.py`) sits on top with the same fallback discipline. That fallback ships a coherent remediation — but every Critical finding gets the same text. The LLM path itself has never been validated against a golden-set; we know it produces *plausible* output, not that it produces *useful* output.
 
 ### 3.3 PDF export → 501
 

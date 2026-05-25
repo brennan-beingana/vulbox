@@ -1,4 +1,4 @@
-"""LLM-driven remediation generation via the OpenAI API.
+"""LLM-driven remediation generation via the Google Gemini API.
 
 Replaces the four canned rules in RemediationService with per-entry prompts
 that have access to the *evidence* — the ART log excerpt, the Falco alerts,
@@ -19,9 +19,13 @@ Design notes:
   are cached on disk keyed by (technique, motivating_cves, evidence_hash)
   so re-runs of the same image are free.
 
-* **Failure → fallback.** If the API key is missing, the model errors, the
+* **Failure → fallback.** If the API key is missing, both models error, the
   call times out, or the response is malformed, we log and return the
   static remediation. The report always populates.
+
+* **Primary + backup.** Provider-level failover (primary → backup model) is
+  owned by :class:`~app.services.llm_provider.GeminiProvider`; this module
+  only constructs prompts/evidence and validates the JSON it returns.
 """
 from __future__ import annotations
 
@@ -40,8 +44,30 @@ from app.models.falco_alert import FalcoAlert
 from app.models.remediation import Remediation
 from app.models.security_matrix_entry import SecurityMatrixEntry
 from app.models.trivy_finding import TrivyFinding
+from app.services.llm_provider import GeminiProvider, _parse_json_response
 
 logger = get_logger(__name__)
+
+# JSON schema constraining the per-entry remediation response (passed to Gemini
+# as response_schema so the keys come back well-typed).
+_REMEDIATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "priority_action": {"type": "string"},
+        "why_it_matters": {"type": "string"},
+        "example_fix": {"type": "string"},
+        "confidence": {
+            "type": "string",
+            "enum": ["critical", "high", "medium", "low"],
+        },
+        "references": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["priority_action", "why_it_matters", "example_fix"],
+}
+
+# Re-exported for tests and the executive-summary service, which historically
+# imported the parser from this module.
+__all__ = ["LLMRemediationService", "_parse_json_response"]
 
 _CACHE_DIR = settings.project_root / "data" / "llm_cache"
 
@@ -88,11 +114,11 @@ class _Evidence:
 
 
 class LLMRemediationService:
-    """Anthropic-backed remediation. Falls back to RemediationService on any failure."""
+    """Gemini-backed remediation. Falls back to RemediationService on any failure."""
 
     @staticmethod
     def is_enabled() -> bool:
-        return settings.llm_remediation_enabled and bool(settings.openai_api_key)
+        return settings.llm_remediation_enabled and bool(settings.gemini_api_key)
 
     @staticmethod
     def generate_remediations(db: Session, run_id: int) -> List[Remediation]:
@@ -135,8 +161,10 @@ class LLMRemediationService:
         if cached is not None:
             payload = cached
         else:
-            payload = _call_openai(evidence)
-            if payload is None:
+            payload = GeminiProvider.generate_json(
+                _SYSTEM_PROMPT, _format_prompt(evidence), _REMEDIATION_SCHEMA
+            )
+            if payload is None or not _has_required_fields(payload):
                 return None
             _write_cache(evidence.cache_key(), payload)
 
@@ -149,7 +177,7 @@ class LLMRemediationService:
                 why_it_matters=str(payload["why_it_matters"])[:500],
                 example_fix=str(payload["example_fix"])[:1000],
                 confidence=str(payload.get("confidence", "medium")).lower(),
-                source=f"openai:{settings.llm_model}",
+                source="gemini",
                 generated_by="llm",
                 references="\n".join(str(r) for r in (payload.get("references") or []))[:2000],
             )
@@ -252,41 +280,10 @@ def _build_static_remediation(
     )
 
 
-def _call_openai(evidence: _Evidence) -> Optional[dict]:
-    """Invoke gpt-4o-mini (or configured model) and return parsed JSON, or None on failure."""
-    try:
-        from openai import OpenAI  # imported lazily so missing dep doesn't break dev mode
-    except ImportError:
-        logger.warning("openai SDK not installed; skipping LLM call")
-        return None
-
-    user_prompt = _format_prompt(evidence)
-
-    try:
-        client = OpenAI(
-            api_key=settings.openai_api_key,
-            timeout=settings.llm_timeout_secs,
-        )
-        resp = client.chat.completions.create(
-            model=settings.llm_model,
-            max_tokens=settings.llm_max_tokens,
-            # JSON mode guarantees a parseable object — system prompt still
-            # carries the schema description so the keys come out right.
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-    except Exception as exc:  # noqa: BLE001 — broad on purpose; any error → fallback
-        logger.warning("OpenAI call failed", extra={"err": str(exc)})
-        return None
-
-    raw = (resp.choices[0].message.content or "") if resp.choices else ""
-    parsed = _parse_json_response(raw)
-    if parsed is None:
-        logger.warning("LLM response was not valid JSON; falling back")
-    return parsed
+def _has_required_fields(payload: dict) -> bool:
+    """The per-entry remediation must carry the three core fields."""
+    required = {"priority_action", "why_it_matters", "example_fix"}
+    return isinstance(payload, dict) and required.issubset(payload.keys())
 
 
 def _format_prompt(e: _Evidence) -> str:
@@ -304,34 +301,6 @@ def _format_prompt(e: _Evidence) -> str:
         f"<evidence>\n{e.art_log_excerpt}\n</evidence>\n\n"
         "Produce the remediation JSON now."
     )
-
-
-def _parse_json_response(raw: str) -> Optional[dict]:
-    """Extract the JSON object from the model's response. Strict — no markdown unwrap."""
-    raw = raw.strip()
-    if not raw:
-        return None
-    # Some models still wrap in ```json blocks despite instructions; strip if present.
-    if raw.startswith("```"):
-        raw = re.sub(r"^```(?:json)?\s*", "", raw)
-        raw = re.sub(r"\s*```$", "", raw)
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        # Try to extract the first {...} block as a last resort.
-        m = re.search(r"\{.*\}", raw, re.DOTALL)
-        if not m:
-            return None
-        try:
-            data = json.loads(m.group(0))
-        except json.JSONDecodeError:
-            return None
-    if not isinstance(data, dict):
-        return None
-    required = {"priority_action", "why_it_matters", "example_fix"}
-    if not required.issubset(data.keys()):
-        return None
-    return data
 
 
 def _cache_path(key: str) -> Path:

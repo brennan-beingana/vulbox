@@ -7,7 +7,7 @@ Automated application security assessment prototype combining static scanning, r
 - JWT auth scaffolding (`/auth/register`, `/auth/login`, `/auth/me`). **Note:** data-plane routes are not yet auth-gated — see `docs/PROGRESS_REPORT.md` §5.1.
 - Trivy / Falco / Atomic Red Team adapters with dev-mode fixture replay.
 - CVE → MITRE map: **1,465 unique CVEs** (55 curated + 2017 generated), **1,060 KEV-flagged**, 17 ART techniques with **88 vendored Linux atomic tests** (`data/sources/atomics/`, pinned SHA).
-- LLM remediation service (OpenAI) with static-rule fallback and prompt-cache-friendly inputs.
+- LLM remediation service (Google Gemini, primary `gemini-2.5-flash` → backup `gemini-2.5-flash-lite`) with static-rule fallback, disk caching, and a run-level executive summary.
 - WebSocket pipeline-event stream with 200-event replay buffer.
 - React dashboard: Login / Register / Dashboard / RunStatus / Report / Reports / Profile / Guides.
 - Ground-truth validation harness (`scripts/validate_e2e.py` + `tests/ground_truth/manifest.yml`). Infrastructure ready; not yet executed on a Docker host.

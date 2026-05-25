@@ -45,6 +45,15 @@ class RemediationResponseSchema(BaseModel):
         from_attributes = True
 
 
+class ExecutiveSummarySchema(BaseModel):
+    headline: str
+    overall_posture: str
+    top_priorities: List[str]
+    confidence: str
+    source: str
+    generated_by: str = "static"
+
+
 class ARTTestResultSchema(BaseModel):
     test_result_id: int
     mitre_test_id: str
@@ -66,4 +75,5 @@ class ReportResponse(BaseModel):
     remediations_count: int
     security_matrix: List[SecurityMatrixEntrySchema]
     remediations: List[RemediationResponseSchema]
+    executive_summary: Optional[ExecutiveSummarySchema] = None
     created_at: datetime

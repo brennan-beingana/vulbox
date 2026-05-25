@@ -103,11 +103,46 @@ export default function Report() {
               ? Math.max(...report.security_matrix.map(e => e.risk_score))
               : '—'
             }
-            {report.security_matrix.length > 0 && <span style={{ fontSize: '1rem', fontWeight: 400, color: 'var(--text-muted)' }}>/50</span>}
+            {report.security_matrix.length > 0 && <span style={{ fontSize: '1rem', fontWeight: 400, color: 'var(--text-muted)' }}>/75</span>}
           </div>
           <div className="stat-trend">Highest entry score</div>
         </div>
       </div>
+
+      {/* Executive Summary */}
+      {report.executive_summary && (
+        <div className="page-section">
+          <div className="section-heading">
+            Executive Summary{' '}
+            <span className={`badge ${report.executive_summary.generated_by === 'llm' ? 'badge-info' : 'badge-neutral'}`}>
+              {report.executive_summary.generated_by === 'llm' ? '✨ AI-generated' : 'rule-based'}
+            </span>
+          </div>
+          <div className="remediation-card">
+            <div className="rem-header">
+              <div className="rem-summary" style={{ fontSize: '1.05rem' }}>
+                {report.executive_summary.headline}
+              </div>
+              <span className={`badge ${confidenceBadge(report.executive_summary.confidence)}`}>
+                {report.executive_summary.confidence}
+              </span>
+            </div>
+            <div className="rem-body">
+              <p>{report.executive_summary.overall_posture}</p>
+              {report.executive_summary.top_priorities.length > 0 && (
+                <>
+                  <p><strong>Top priorities:</strong></p>
+                  <ol>
+                    {report.executive_summary.top_priorities.map((p, i) => (
+                      <li key={i}>{p}</li>
+                    ))}
+                  </ol>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Security Matrix */}
       <div className="page-section">
@@ -162,7 +197,7 @@ export default function Report() {
                         className="risk-chip"
                         style={{ background: riskColor(e.risk_score) }}
                       >
-                        {e.risk_score}/50
+                        {e.risk_score}/75
                       </span>
                     </td>
                   </tr>
@@ -181,13 +216,31 @@ export default function Report() {
             <div key={r.id} className="remediation-card">
               <div className="rem-header">
                 <div className="rem-summary">{r.summary}</div>
-                <span className={`badge ${confidenceBadge(r.confidence)}`}>{r.confidence}</span>
+                <span style={{ display: 'flex', gap: '0.375rem', alignItems: 'center' }}>
+                  <span className={`badge ${r.generated_by === 'llm' ? 'badge-info' : 'badge-neutral'}`}>
+                    {r.generated_by === 'llm' ? '✨ AI' : 'rule'}
+                  </span>
+                  <span className={`badge ${confidenceBadge(r.confidence)}`}>{r.confidence}</span>
+                </span>
               </div>
               <div className="rem-body">
                 <p><strong>Priority action:</strong> {r.priority_action}</p>
                 <p><strong>Why it matters:</strong> {r.why_it_matters}</p>
                 {r.example_fix && (
                   <div className="code-block">{r.example_fix}</div>
+                )}
+                {r.references && r.references.trim() && (
+                  <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                    <strong>References:</strong>{' '}
+                    {r.references.split('\n').filter(Boolean).map((ref, i) => (
+                      <span key={i}>
+                        {i > 0 && ' · '}
+                        {/^https?:\/\//.test(ref)
+                          ? <a href={ref} target="_blank" rel="noreferrer">{ref}</a>
+                          : ref}
+                      </span>
+                    ))}
+                  </p>
                 )}
               </div>
             </div>

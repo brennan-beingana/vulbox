@@ -92,17 +92,25 @@ GET  /runs/{id}/validations → ARTTestResult rows for the run
 - **TrivyFinding** (`trivy_findings`) — per-CVE static scan result; `fix_available` flag
 - **ARTTestResult** (`art_test_results`) — per-technique ART result; `exploited` and `crash_occurred` booleans
 - **FalcoAlert** (`falco_alerts`) — runtime alert; `test_result_id` FK links detection to the specific test that triggered it
-- **SecurityMatrixEntry** (`security_matrix_entries`) — three-dimensional output: `is_present`, `is_exploitable`, `is_detectable`, `risk_score` (0–50)
-- **Remediation** (`remediations`) — one actionable fix per SecurityMatrixEntry; `matrix_entry_id` FK
+- **SecurityMatrixEntry** (`security_matrix_entries`) — three-dimensional output: `is_present`, `is_exploitable`, `is_detectable`, `risk_score` (0–75)
+- **Remediation** (`remediations`) — one actionable fix per SecurityMatrixEntry; `matrix_entry_id` FK; `generated_by` ∈ {static, llm}, `source` (e.g. "gemini" / "rule-based"), `references`
+- **RunSummary** (`run_summaries`) — one run-level executive summary per run; `top_priorities` is JSON-encoded list[str]; `generated_by` ∈ {static, llm}
 - **User** (`users`) — JWT auth user; `role` ∈ {provider, admin}
 
 ### Risk scoring (`app/services/orchestrator.py → _compute_risk`)
-Base 10 (present) + 30 if exploited + 10 if undetected. Capped at 50.
+Base 10 (present) + 30 if exploited + 10 if undetected + severity weight (critical 20 / high 15 / medium 10 / low 5 / unknown 0). Capped at 75 (`RISK_SCORE_MAX`).
 
 ### Adapters (`app/adapters/`)
 - In **dev mode** (`VULBOX_DEV_MODE=true`): all adapters read from `data/sample_outputs/` fixture files, no Docker/Trivy/Falco processes launched.
 - In **production mode**: `TrivyAdapter` calls `trivy` CLI, `FalcoAdapter` starts Falco sidecar, `ARTAdapter` calls `scanners/atomic_runner.sh`.
 - `TrivyAdapter.is_blocking()` always returns `False` (Non-Blocking Rule §4.12.2).
+
+### LLM remediation (Google Gemini)
+- `LLMRemediationService` (`app/services/llm_remediation.py`) generates one remediation per SecurityMatrixEntry; entries with `risk_score ≥ VULBOX_LLM_MIN_RISK_SCORE` get a Gemini call, the rest use the static `RemediationService` rule. `RunSummaryService` adds one run-level executive summary.
+- `GeminiProvider` (`app/services/llm_provider.py`) owns the **primary → backup** failover: one API key, `gemini-2.5-flash` serves every call, `gemini-2.5-flash-lite` is the failover on API error / 429 `RESOURCE_EXHAUSTED` / timeout. Returns parsed JSON or `None`; never raises.
+- **Any failure → static fallback.** Missing key/SDK, both models erroring, or malformed JSON all fall back to the rule-based path, so the report always populates. Responses are cached on disk under `data/llm_cache/`.
+- ART runner output is untrusted (hostile container); it's wrapped in `<evidence>` tags and the response is schema-validated.
+- Env vars: `VULBOX_LLM_REMEDIATION` (enable, default false), `GEMINI_API_KEY`, `VULBOX_LLM_MODEL_PRIMARY`, `VULBOX_LLM_MODEL_BACKUP`, `VULBOX_LLM_MIN_RISK_SCORE`, `VULBOX_LLM_TIMEOUT_SECS`, `VULBOX_LLM_MAX_TOKENS`, `VULBOX_LLM_EXEC_SUMMARY` (default true).
 
 ### Authentication
 - JWT via `python-jose` (HS256). Secret from `VULBOX_SECRET_KEY` env var.
@@ -137,6 +145,7 @@ app/
                 falco_alert.py  security_matrix_entry.py  remediation.py  user.py
   schemas/      run.py  report.py  trivy.py  falco.py  atomic.py
   services/     orchestrator.py  docker_manager.py  run_service.py  remediation_service.py
+                llm_remediation.py  llm_provider.py  run_summary_service.py
 ci/             github-actions.yml  gitlab-ci-sample.yml
 docker/         Dockerfile.app  Dockerfile.target-app  docker-compose.yml
 frontend/src/

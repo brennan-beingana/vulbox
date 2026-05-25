@@ -139,7 +139,7 @@
 
   Read 2 files, listed 1 directory (ctrl+o to expand)
 
-● Now I've seen the full stack — remediation_service.py (4 canned rules) plus llm_remediation.py (OpenAI-driven, evidence-grounded, cached,
+● Now I've seen the full stack — remediation_service.py (4 canned rules) plus llm_remediation.py (Gemini-driven, evidence-grounded, cached,
    schema-validated). It's a solid skeleton. Here's where I think the leverage is, ranked by impact.
 
   What's already good
@@ -166,7 +166,7 @@
 
   2. Stop relying on LLM recall for fix versions — inject canonical fix data
 
-  gpt-4o-mini will confidently tell you "upgrade openssl to 3.0.12" when the actual fix is 3.0.15. The model shouldn't be recalling fix
+  A fast LLM like gemini-2.5-flash will confidently tell you "upgrade openssl to 3.0.12" when the actual fix is 3.0.15. The model shouldn't be recalling fix
   versions; it should be synthesizing prose around facts you give it.
 
   Add a FixDataSource that pulls per-CVE fix info from:

@@ -27,6 +27,7 @@ from app.models.trivy_finding import TrivyFinding
 from app.services.docker_manager import BuildFailedError, DockerManager, SandboxNotRunningError
 from app.services.llm_remediation import LLMRemediationService
 from app.services.remediation_service import RemediationService
+from app.services.run_summary_service import RunSummaryService
 
 logger = get_logger(__name__)
 
@@ -325,6 +326,9 @@ async def _phase_report(run: AssessmentRun, db: Session) -> None:
         await asyncio.to_thread(LLMRemediationService.generate_remediations, db, run.id)
     else:
         await asyncio.to_thread(RemediationService.generate_remediations, db, run.id)
+
+    # Run-level executive summary (Gemini call, or templated fallback).
+    await asyncio.to_thread(RunSummaryService.generate_summary, db, run.id)
 
     _set_status(db, run, "COMPLETE")
     _push_event(run.id, {"event": "complete"})

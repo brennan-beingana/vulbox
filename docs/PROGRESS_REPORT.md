@@ -28,7 +28,7 @@ This document inventories what is real, what is fragile, and what is missing —
 | Atomic Red Team runner | Real bash script, 13 techniques | No (script not yet run inside CI) | No — script invocation untested |
 | Risk scoring (`Presence × Exploitability × Detectability`) | Real formula, capped 0–75 | Yes | Yes |
 | CVE → MITRE technique map | YAML file, 55 CVEs, 12 techniques | Yes (8 unit tests) | **Coverage too thin** |
-| LLM remediation service | OpenAI client + static fallback | Cache + JSON parse tested | **Output quality not validated** |
+| LLM remediation service | Gemini client (primary→backup) + static fallback | Cache + JSON parse + failover tested | **Output quality not validated** |
 | Static remediation rules | 4 hard-coded `(exploited, detectable)` rules | Yes | Acceptable as fallback |
 | WebSocket event streaming | Per-run queue + 200-event replay | Yes | Yes |
 | JWT auth (`/auth/*`) | Real, HS256, password hashing | Yes | Yes |
@@ -64,7 +64,7 @@ The April 2026 redesign delivers a fixed sidebar layout (Dashboard / Reports / G
 `data/cve_technique_map.yml` (208 lines, 55 CVEs, 12 techniques) is loaded at startup and externalised — adding a new CVE doesn't require a code change. Eight unit tests guard the loader and signal-driven fallback rules.
 
 ### 3.6 The LLM remediation service has the right scaffolding
-`app/services/llm_remediation.py` calls OpenAI with prompt-cache-friendly inputs, sandboxes untrusted evidence, parses JSON with markdown-fence stripping, falls back to static rules on any error, and caches results by `(technique, CVEs, log_hash)`. The plumbing is sound — the **content quality has not been validated on real evidence**.
+`app/services/llm_remediation.py` calls Google Gemini (primary `gemini-2.5-flash` → backup `gemini-2.5-flash-lite`, failover in `llm_provider.py`) with prompt-cache-friendly inputs, sandboxes untrusted evidence, parses JSON with markdown-fence stripping, falls back to static rules on any error, and caches results by `(technique, CVEs, log_hash)`. The plumbing is sound — the **content quality has not been validated on real evidence**.
 
 ---
 
@@ -200,9 +200,9 @@ The consent check exists only at `POST /runs`. The orchestrator does not re-chec
 
 The remediation service prompt-injects evidence carefully, but the *output* is currently inserted directly into the report and rendered as text in the React UI. If a malicious target manages to influence the LLM's output (e.g. via a CVE description containing crafted text), the remediation field could carry HTML that the React renderer escapes — but also Markdown-ish content that humans copy-paste into their codebase. There is no "this remediation is LLM-generated, treat with care" disclaimer in the UI.
 
-### 6.4 Single-point-of-failure on the OpenAI key
+### 6.4 Single-point-of-failure on the Gemini key
 
-`VULBOX_OPENAI_API_KEY` is a single env var, no rotation, no rate limiting, no per-user quota. A bug or hostile target that triggers many high-token calls is a billing event. Add a token-budget per run (e.g. 30k tokens max) and a hard cap.
+`GEMINI_API_KEY` is a single env var, no rotation, no rate limiting, no per-user quota. The primary→backup chain only swaps the *model* (`gemini-2.5-flash` → `gemini-2.5-flash-lite`) on error/429, so it adds resilience against a single-model outage but does **not** remove the single-key / billing SPOF. A bug or hostile target that triggers many high-token calls is still a billing event. Add a token-budget per run (e.g. 30k tokens max) and a hard cap.
 
 ### 6.5 SQLite under concurrent writes
 
@@ -282,7 +282,7 @@ The priorities below are listed in **value-per-week-of-work** order — the firs
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
 | Adding auth breaks the existing demo flow | High | Medium | Keep a `--dev-no-auth` flag for the demo until end-to-end tests pass with auth on |
-| Real-target integration tests are flaky on shared CI runners | High | High | Pin Docker image digests; record-replay HTTP for OpenAI; allocate a dedicated runner |
+| Real-target integration tests are flaky on shared CI runners | High | High | Pin Docker image digests; record-replay HTTP for Gemini; allocate a dedicated runner |
 | LLM golden-set is judged subjectively | Medium | Medium | Two reviewers per case, keep the dataset versioned, treat the score as a trend not an absolute |
 | Per-app config schema drifts from `.vulbox.yml` adoption | Medium | High | Version the schema (`v1: …`) from day one; refuse unknown versions |
 | Postgres migration introduces silent type coercion bugs | Low | High | Run the full test suite against both backends in CI for at least one release |
