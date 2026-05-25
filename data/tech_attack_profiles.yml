@@ -1,0 +1,176 @@
+# Technology → attack profile catalog.
+#
+# Maps a detected stack tag (produced by StackDetector.tags()) to a prioritized
+# list of MITRE ATT&CK techniques to *proactively* queue, independent of whether
+# Trivy flagged a matching CVE. This is the stack-aware counterpart to the
+# reactive CVE→technique map in cve_technique_map.generated.yml.
+#
+# Selection model: build_queue() unions the techniques of every profile whose
+# key is in the detected tag set, in the file order below (framework profiles
+# are listed after their base language so they layer on top). Deduped against
+# techniques already queued by CVE-driven matches.
+#
+# INVARIANT: every technique listed here must be executable — backed either by a
+# vendored atomic under data/sources/atomics/<id>/ or by a hand-written probe in
+# scanners/atomic_runner.sh. tests/test_tech_profiles.py enforces this so the
+# catalog can never reference a technique that produces "not applicable".
+
+profiles:
+  # ---- Languages (base layers) ----
+  python:
+    description: "Python runtime — interpreter abuse + local recon/credential exposure."
+    techniques:
+      - id: T1059.006
+        reason: "Python interpreter present — command/script execution."
+      - id: T1059.004
+        reason: "Shell available alongside the interpreter."
+      - id: T1552.001
+        reason: "Credentials commonly left in .env / settings files."
+      - id: T1083
+        reason: "File and directory discovery to map the app layout."
+      - id: T1082
+        reason: "System information discovery baseline."
+
+  node:
+    description: "Node.js runtime — JS execution + local recon/credential exposure."
+    techniques:
+      - id: T1059.007
+        reason: "JavaScript/Node execution."
+      - id: T1059.004
+        reason: "Shell available alongside the runtime."
+      - id: T1552.001
+        reason: "Credentials commonly left in .env / config files."
+      - id: T1083
+        reason: "File and directory discovery."
+      - id: T1082
+        reason: "System information discovery baseline."
+
+  java:
+    description: "JVM runtime — shell exec + local recon/credential exposure."
+    techniques:
+      - id: T1059.004
+        reason: "Shell available for command execution."
+      - id: T1552.001
+        reason: "Credentials in application.properties / env."
+      - id: T1083
+        reason: "File and directory discovery."
+      - id: T1082
+        reason: "System information discovery baseline."
+
+  go:
+    description: "Go binary — shell exec + local recon/credential exposure."
+    techniques:
+      - id: T1059.004
+        reason: "Shell available for command execution."
+      - id: T1552.001
+        reason: "Credentials in env / config files."
+      - id: T1083
+        reason: "File and directory discovery."
+      - id: T1082
+        reason: "System information discovery baseline."
+
+  ruby:
+    description: "Ruby runtime — shell exec + local recon/credential exposure."
+    techniques:
+      - id: T1059.004
+        reason: "Shell available for command execution."
+      - id: T1552.001
+        reason: "Credentials in config / secrets files."
+      - id: T1083
+        reason: "File and directory discovery."
+      - id: T1082
+        reason: "System information discovery baseline."
+
+  # ---- Web frameworks (layer on top of their base language) ----
+  fastapi:
+    description: "FastAPI/ASGI web app — public-facing exploit surface + web shell."
+    techniques:
+      - id: T1190
+        reason: "Exploit public-facing application (exposed routes, /docs, SSTI)."
+      - id: T1505.003
+        reason: "Web shell upload to the running app."
+      - id: T1059.006
+        reason: "Python execution via app endpoints."
+      - id: T1005
+        reason: "Exfiltrate data from the local system once inside."
+
+  django:
+    description: "Django web app — public exploit surface, DEBUG/admin exposure."
+    techniques:
+      - id: T1190
+        reason: "Exploit public-facing app (DEBUG info-leak, admin, SSTI)."
+      - id: T1505.003
+        reason: "Web shell upload."
+      - id: T1059.006
+        reason: "Python execution via app."
+      - id: T1552.001
+        reason: "SECRET_KEY / DB creds in settings."
+      - id: T1005
+        reason: "Data collection from local system."
+
+  flask:
+    description: "Flask web app — public exploit surface + web shell."
+    techniques:
+      - id: T1190
+        reason: "Exploit public-facing app (SSTI via Jinja, debug console)."
+      - id: T1505.003
+        reason: "Web shell upload."
+      - id: T1059.006
+        reason: "Python execution via app."
+
+  express:
+    description: "Express/Node web app — public exploit surface + web shell."
+    techniques:
+      - id: T1190
+        reason: "Exploit public-facing app (route/middleware flaws)."
+      - id: T1505.003
+        reason: "Web shell upload."
+      - id: T1059.007
+        reason: "JavaScript execution via app."
+      - id: T1005
+        reason: "Data collection from local system."
+
+  next:
+    description: "Next.js web app — public exploit surface + web shell."
+    techniques:
+      - id: T1190
+        reason: "Exploit public-facing app (SSR/API routes)."
+      - id: T1505.003
+        reason: "Web shell upload."
+      - id: T1059.007
+        reason: "JavaScript execution via app."
+
+  java-spring:
+    description: "Spring Boot web app — public exploit surface (Spring4Shell-class)."
+    techniques:
+      - id: T1190
+        reason: "Exploit public-facing app (Spring4Shell, actuator exposure)."
+      - id: T1505.003
+        reason: "Web shell upload."
+      - id: T1552.001
+        reason: "Credentials in application.properties."
+      - id: T1005
+        reason: "Data collection from local system."
+
+  rails:
+    description: "Rails web app — public exploit surface + web shell."
+    techniques:
+      - id: T1190
+        reason: "Exploit public-facing app (deserialization, mass-assignment)."
+      - id: T1505.003
+        reason: "Web shell upload."
+      - id: T1005
+        reason: "Data collection from local system."
+
+  # ---- ASGI/WSGI servers (weak signal of an exposed web app) ----
+  uvicorn:
+    description: "ASGI server entrypoint — implies an exposed web app."
+    techniques:
+      - id: T1190
+        reason: "Server entrypoint implies a public-facing app to exploit."
+
+  gunicorn:
+    description: "WSGI server entrypoint — implies an exposed web app."
+    techniques:
+      - id: T1190
+        reason: "Server entrypoint implies a public-facing app to exploit."

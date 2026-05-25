@@ -1,4 +1,5 @@
 from app.models.art_test_result import ARTTestResult
+from app.models.detected_technology import DetectedTechnology
 from app.models.falco_alert import FalcoAlert
 from app.models.remediation import Remediation
 from app.models.run import AssessmentRun
@@ -11,6 +12,7 @@ __all__ = [
     "AssessmentRun",
     "TrivyFinding",
     "ARTTestResult",
+    "DetectedTechnology",
     "FalcoAlert",
     "SecurityMatrixEntry",
     "Remediation",

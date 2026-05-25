@@ -7,12 +7,14 @@ from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.models.detected_technology import DetectedTechnology
 from app.models.remediation import Remediation
 from app.models.run_summary import RunSummary
 from app.models.security_matrix_entry import SecurityMatrixEntry
 from app.models.trivy_finding import TrivyFinding
 from app.models.art_test_result import ARTTestResult
 from app.schemas.report import (
+    DetectedTechnologySchema,
     ExecutiveSummarySchema,
     RemediationResponseSchema,
     ReportResponse,
@@ -59,6 +61,12 @@ def get_report(run_id: int, db: Session = Depends(get_db)):
     art_count = (
         db.query(ARTTestResult).filter(ARTTestResult.run_id == run_id).count()
     )
+    technologies = (
+        db.query(DetectedTechnology)
+        .filter(DetectedTechnology.run_id == run_id)
+        .order_by(DetectedTechnology.confidence.desc())
+        .all()
+    )
 
     return ReportResponse(
         run_id=run.id,
@@ -68,6 +76,7 @@ def get_report(run_id: int, db: Session = Depends(get_db)):
         trivy_findings_count=trivy_count,
         art_tests_count=art_count,
         remediations_count=len(remediations),
+        detected_technologies=[DetectedTechnologySchema.model_validate(t) for t in technologies],
         security_matrix=[SecurityMatrixEntrySchema.model_validate(e) for e in matrix],
         remediations=[RemediationResponseSchema.model_validate(r) for r in remediations],
         executive_summary=_load_executive_summary(db, run_id),
@@ -118,7 +127,13 @@ def export_report(
             db.query(Remediation).filter(Remediation.run_id == run_id).all()
         )
         summary = _load_executive_summary(db, run_id)
-        html = _render_pdf_html(run, matrix, remediations, summary)
+        technologies = (
+            db.query(DetectedTechnology)
+            .filter(DetectedTechnology.run_id == run_id)
+            .order_by(DetectedTechnology.confidence.desc())
+            .all()
+        )
+        html = _render_pdf_html(run, matrix, remediations, summary, technologies)
         try:
             import weasyprint
             pdf_bytes = weasyprint.HTML(string=html).write_pdf()
@@ -165,7 +180,7 @@ def _risk_color(score: int) -> str:
     return "#059669"
 
 
-def _render_pdf_html(run, matrix, remediations=None, summary=None) -> str:
+def _render_pdf_html(run, matrix, remediations=None, summary=None, technologies=None) -> str:
     from html import escape as esc
 
     def _badge(text: str, bg: str, fg: str) -> str:
@@ -204,6 +219,23 @@ def _render_pdf_html(run, matrix, remediations=None, summary=None) -> str:
         + _stat("Max Risk", f"{max_risk}<span style='font-size:12px;font-weight:500;color:#9ca3af;'>/75</span>", _risk_color(max_risk))
         + "</tr></table>"
     )
+
+    # ---- detected tech stack ----
+    tech_html = ""
+    if technologies:
+        chips = "".join(
+            "<span style='display:inline-block;font-size:10px;color:#4f46e5;"
+            "background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.18);"
+            "border-radius:6px;padding:3px 9px;margin:0 6px 6px 0;'>"
+            f"{esc(t.name)}"
+            + (f"<span style='color:#9ca3af;'> {esc(t.version)}</span>" if t.version else "")
+            + "</span>"
+            for t in technologies
+        )
+        tech_html = (
+            "<div class='section-label'>Detected Stack</div>"
+            f"<div style='margin-bottom:4px;'>{chips}</div>"
+        )
 
     # ---- executive summary hero ----
     summary_html = ""
@@ -321,6 +353,7 @@ def _render_pdf_html(run, matrix, remediations=None, summary=None) -> str:
       <span class="chip"><b>Status</b> {esc(run.status or '')}</span>
     </div>
     {stats_html}
+    {tech_html}
     {summary_html}
     <div class="section-label">Security Matrix</div>
     <table class="matrix"><tr><th>MITRE Tactic</th><th>Present</th><th>Exploitable</th>

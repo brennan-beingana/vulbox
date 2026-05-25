@@ -21,6 +21,7 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.logging import get_logger, log_pipeline_event
 from app.models.art_test_result import ARTTestResult
+from app.models.detected_technology import DetectedTechnology
 from app.models.run import AssessmentRun
 from app.models.security_matrix_entry import SecurityMatrixEntry
 from app.models.trivy_finding import TrivyFinding
@@ -28,6 +29,7 @@ from app.services.docker_manager import BuildFailedError, DockerManager, Sandbox
 from app.services.llm_remediation import LLMRemediationService
 from app.services.remediation_service import RemediationService
 from app.services.run_summary_service import RunSummaryService
+from app.services.stack_detector import StackDetector, TechProfile
 
 logger = get_logger(__name__)
 
@@ -129,14 +131,16 @@ async def start_assessment(run_id: int) -> None:
 
         async def _pipeline() -> None:
             nonlocal container_id, falco_attached
-            trivy_findings, repo_path = await _phase_build_and_scan(run, image_tag, db)
+            trivy_findings, repo_path, tech_profile = await _phase_build_and_scan(
+                run, image_tag, db
+            )
             sandbox_cfg = await asyncio.to_thread(DockerManager.load_sandbox_config, repo_path)
             container_id = await _phase_deploy_sandbox(
                 run, image_tag, db, run_id, sandbox_cfg
             )
             falco_attached = True
             await _phase_test_loop(
-                run, image_tag, container_id, trivy_findings, db, sandbox_cfg
+                run, image_tag, container_id, trivy_findings, db, sandbox_cfg, tech_profile
             )
             await _phase_report(run, db)
 
@@ -185,12 +189,30 @@ async def start_assessment(run_id: int) -> None:
 
 async def _phase_build_and_scan(
     run: AssessmentRun, image_tag: str, db: Session
-) -> Tuple[List[TrivyFinding], Optional[Path]]:
+) -> Tuple[List[TrivyFinding], Optional[Path], TechProfile]:
     _set_status(db, run, "BUILDING")
     _push_event(run.id, {"event": "phase", "phase": "BUILDING"})
 
     repo_path = await asyncio.to_thread(DockerManager.clone_repo, run.repo_url, run.id)
     await asyncio.to_thread(DockerManager.build_image, repo_path, image_tag, run.id)
+
+    # Fingerprint the tech stack from the repo's Dockerfile + manifests so the
+    # test loop can queue stack-relevant attacks. Best-effort: detect() never
+    # raises, and an empty profile degrades the queue to its reactive behavior.
+    tech_profile = await asyncio.to_thread(StackDetector.detect, repo_path)
+    for tech in tech_profile.techs:
+        db.add(
+            DetectedTechnology(
+                run_id=run.id,
+                name=tech.name,
+                version=tech.version,
+                source=tech.source,
+                confidence=tech.confidence,
+            )
+        )
+    db.commit()
+    log_pipeline_event(logger, "stack_detected", run.id, tags=sorted(tech_profile.tags()))
+    _push_event(run.id, {"event": "stack_detected", "tags": sorted(tech_profile.tags())})
 
     _set_status(db, run, "SCANNING")
     _push_event(run.id, {"event": "phase", "phase": "SCANNING"})
@@ -204,7 +226,7 @@ async def _phase_build_and_scan(
 
     log_pipeline_event(logger, "scan_complete", run.id, findings=len(trivy_findings))
     _push_event(run.id, {"event": "scan_complete", "findings": len(trivy_findings)})
-    return trivy_findings, repo_path
+    return trivy_findings, repo_path, tech_profile
 
 
 async def _phase_deploy_sandbox(
@@ -234,9 +256,10 @@ async def _phase_test_loop(
     trivy_findings: List[TrivyFinding],
     db: Session,
     sandbox_cfg: Dict[str, Any],
+    tech_profile: Optional[TechProfile] = None,
 ) -> None:
     queue: List[Tuple[str, Optional[int]]] = await asyncio.to_thread(
-        ARTAdapter.build_queue, trivy_findings
+        ARTAdapter.build_queue, trivy_findings, tech_profile
     )
     findings_by_id: Dict[int, TrivyFinding] = {f.finding_id: f for f in trivy_findings}
     rebuilds = 0

@@ -31,7 +31,22 @@ def test_full_pipeline_against_vulnerable_target(api_client, target_path):
         f"events:\n" + "\n".join(repr(e) for e in events)
     )
 
+    # Stack detection fingerprints the node/express target before testing.
+    stack_events = [e for e in events if e.get("event") == "stack_detected"]
+    assert stack_events, (
+        "no stack_detected event — StackDetector not wired into BUILDING.\n"
+        "events:\n" + "\n".join(repr(e) for e in events)
+    )
+    assert "node" in stack_events[-1].get("tags", []), (
+        f"expected 'node' in detected stack tags, got {stack_events[-1].get('tags')}"
+    )
+
     report = api_client.get_report(run_id)
+
+    detected = {t["name"] for t in report.get("detected_technologies", [])}
+    assert {"node", "express"} <= detected, (
+        f"expected node+express in detected_technologies, got {sorted(detected)}"
+    )
 
     # node:14-alpine + pinned-vulnerable express/lodash deterministically
     # produces well above 5 CVEs; tightening this further makes the test

@@ -15,6 +15,16 @@ class TrivyFindingSchema(BaseModel):
         from_attributes = True
 
 
+class DetectedTechnologySchema(BaseModel):
+    name: str
+    version: Optional[str] = None
+    source: str
+    confidence: float
+
+    class Config:
+        from_attributes = True
+
+
 class SecurityMatrixEntrySchema(BaseModel):
     entry_id: int
     finding_id: Optional[int]
@@ -73,6 +83,7 @@ class ReportResponse(BaseModel):
     trivy_findings_count: int
     art_tests_count: int
     remediations_count: int
+    detected_technologies: List[DetectedTechnologySchema] = []
     security_matrix: List[SecurityMatrixEntrySchema]
     remediations: List[RemediationResponseSchema]
     executive_summary: Optional[ExecutiveSummarySchema] = None

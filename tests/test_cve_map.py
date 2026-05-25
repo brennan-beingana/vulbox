@@ -116,3 +116,81 @@ def test_ransomware_flagged_cve_precedes_kev_only(monkeypatch):
     findings = [_f("CVE-TEST-KEV"), _f("CVE-TEST-RANSOM")]
     techs = [t for t, _ in ART.ARTAdapter.build_queue(findings)]
     assert techs.index("T1486") < techs.index("T1190")
+
+
+# --- Stack-aware proactive bucket (Component 4) ---
+
+def _profile(*tags):
+    from app.services.stack_detector import DetectedTech, TechProfile
+
+    return TechProfile(
+        techs=[DetectedTech(name=t, version=None, source="test", confidence=1.0) for t in tags]
+    )
+
+
+def test_tech_profile_none_reproduces_prior_queue():
+    findings = [_f("CVE-2099-0003", severity="low", pkg="rare-pkg", desc="x")]
+    assert ART.ARTAdapter.build_queue(findings) == ART.ARTAdapter.build_queue(findings, None)
+
+
+def test_empty_profile_changes_nothing():
+    findings = [_f("CVE-2099-0003", severity="low", pkg="rare-pkg", desc="x")]
+    base = ART.ARTAdapter.build_queue(findings)
+    with_empty = ART.ARTAdapter.build_queue(findings, _profile())  # no techs
+    assert base == with_empty
+
+
+def test_profile_injects_proactive_techniques():
+    # Minimal finding (no keywords, low severity) — proactive bucket supplies
+    # the FastAPI techniques that nothing else would queue.
+    findings = [_f("CVE-2099-0003", severity="low", pkg="rare-pkg", desc="x")]
+    techs = [t for t, _ in ART.ARTAdapter.build_queue(findings, _profile("python", "fastapi"))]
+    assert "T1190" in techs
+    assert "T1505.003" in techs
+    assert "T1059.006" in techs
+
+
+def test_proactive_sits_after_cve_and_before_fallback():
+    # CVE-driven T1068 leads; uvicorn proactive T1190 must precede the always-on
+    # T1082 fallback (uvicorn profile has only T1190, not T1082).
+    findings = [_f("CVE-2021-4034", severity="critical", pkg="polkit")]
+    queue = [t for t, _ in ART.ARTAdapter.build_queue(findings, _profile("uvicorn"))]
+    assert queue.index("T1068") < queue.index("T1190") < queue.index("T1082")
+
+
+def test_proactive_bucket_dedups_against_other_buckets():
+    findings = [_f("CVE-2099-0003", severity="low", pkg="rare-pkg", desc="x")]
+    queue = [t for t, _ in ART.ARTAdapter.build_queue(findings, _profile("python", "fastapi"))]
+    assert len(queue) == len(set(queue))
+
+
+# --- CVE technology tagging + stack-relevant priority (Component 2) ---
+
+def test_generated_map_carries_technology_metadata():
+    # Spring4Shell is tagged java/java-spring by build_cve_map.py.
+    assert "java-spring" in ART._CVE_METADATA.get("CVE-2022-22965", {}).get("technology", [])
+
+
+def test_stack_relevant_cve_leads_queue(monkeypatch):
+    # A plain (non-KEV) java-spring CVE should outrank a ransomware+KEV CVE that
+    # has nothing to do with the detected stack, when the stack is java-spring.
+    monkeypatch.setitem(ART._CVE_METADATA, "CVE-STACK", {"technology": ["java", "java-spring"]})
+    monkeypatch.setitem(ART._CVE_METADATA, "CVE-RANSOM", {"kev": True, "ransomware": True})
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-STACK", "T1190")
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-RANSOM", "T1486")
+
+    findings = [_f("CVE-RANSOM"), _f("CVE-STACK")]
+    techs = [t for t, _ in ART.ARTAdapter.build_queue(findings, _profile("java", "java-spring"))]
+    assert techs.index("T1190") < techs.index("T1486")
+
+
+def test_stack_relevance_ignored_without_profile(monkeypatch):
+    # Same CVEs, no profile: ransomware ordering wins as before.
+    monkeypatch.setitem(ART._CVE_METADATA, "CVE-STACK", {"technology": ["java", "java-spring"]})
+    monkeypatch.setitem(ART._CVE_METADATA, "CVE-RANSOM", {"kev": True, "ransomware": True})
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-STACK", "T1190")
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-RANSOM", "T1486")
+
+    findings = [_f("CVE-RANSOM"), _f("CVE-STACK")]
+    techs = [t for t, _ in ART.ARTAdapter.build_queue(findings)]
+    assert techs.index("T1486") < techs.index("T1190")

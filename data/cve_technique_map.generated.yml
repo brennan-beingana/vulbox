@@ -3,7 +3,7 @@
 # Curated overrides live in data/cve_technique_map.yml and win on conflict.
 #
 metadata:
-  generated_at: '2026-05-16T08:36:42+00:00'
+  generated_at: '2026-05-25T20:31:28+00:00'
   sources:
     kev:
       path: data/sources/kev.json
@@ -18,6 +18,7 @@ metadata:
     unique_techniques: 85
     kev_bridged: 1105
     kev_unmapped: 332
+    cves_with_technology: 29
 mappings:
 - cve: CVE-2002-0367
   technique: null
@@ -44,6 +45,8 @@ mappings:
   provenance: kev:unmapped
   kev: true
   vendor: Apache
+  technology:
+  - java
 - cve: CVE-2006-2492
   technique: T1203
   provenance: kev:cwe_bridge:CWE-120
@@ -204,12 +207,16 @@ mappings:
   provenance: kev:cwe_bridge:CWE-20
   kev: true
   vendor: Apache
+  technology:
+  - java
 - cve: CVE-2012-0507
   technique: null
   provenance: kev:unmapped
   kev: true
   ransomware: true
   vendor: Oracle
+  technology:
+  - java
 - cve: CVE-2012-0518
   technique: null
   provenance: kev:unmapped
@@ -241,6 +248,8 @@ mappings:
   provenance: kev:cwe_bridge:CWE-20
   kev: true
   vendor: PHP
+  technology:
+  - php
 - cve: CVE-2012-1889
   technique: T1203
   provenance: kev:cwe_bridge:CWE-119
@@ -276,6 +285,8 @@ mappings:
   provenance: kev:unmapped
   kev: true
   vendor: Oracle
+  technology:
+  - java
 - cve: CVE-2013-0074
   technique: null
   provenance: kev:unmapped
@@ -288,6 +299,8 @@ mappings:
   kev: true
   ransomware: true
   vendor: Oracle
+  technology:
+  - java
 - cve: CVE-2013-0643
   technique: T1068
   provenance: kev:cwe_bridge:CWE-264
@@ -323,6 +336,8 @@ mappings:
   provenance: kev:cwe_bridge:CWE-20
   kev: true
   vendor: Apache
+  technology:
+  - java
 - cve: CVE-2013-2551
   technique: T1203
   provenance: kev:cwe_bridge:CWE-416
@@ -380,6 +395,9 @@ mappings:
   provenance: kev:cwe_bridge:CWE-22
   kev: true
   vendor: Rails
+  technology:
+  - rails
+  - ruby
 - cve: CVE-2014-0160
   technique: T1212
   provenance: kev:cwe_bridge:CWE-125
@@ -571,6 +589,8 @@ mappings:
   provenance: kev:cwe_bridge:CWE-200
   kev: true
   vendor: Jenkins
+  technology:
+  - java
 - cve: CVE-2015-7450
   technique: T1059
   provenance: kev:cwe_bridge:CWE-94
@@ -618,6 +638,9 @@ mappings:
   provenance: kev:cwe_bridge:CWE-22
   kev: true
   vendor: Rails
+  technology:
+  - rails
+  - ruby
 - cve: CVE-2016-0984
   technique: T1203
   provenance: kev:cwe_bridge:CWE-416
@@ -628,6 +651,8 @@ mappings:
   provenance: kev:cwe_bridge:CWE-77
   kev: true
   vendor: PHP
+  technology:
+  - php
 - cve: CVE-2016-1010
   technique: T1203
   provenance: kev:cwe_bridge:CWE-190
@@ -690,6 +715,8 @@ mappings:
   provenance: kev:unmapped
   kev: true
   vendor: Oracle
+  technology:
+  - java
 - cve: CVE-2016-3643
   technique: T1068
   provenance: kev:cwe_bridge:CWE-264
@@ -790,6 +817,8 @@ mappings:
   provenance: kev:cwe_bridge:CWE-284
   kev: true
   vendor: Apache
+  technology:
+  - java
 - cve: CVE-2016-9563
   technique: T1190
   provenance: kev:cwe_bridge:CWE-611
@@ -868,6 +897,8 @@ mappings:
   provenance: kev:unmapped
   kev: true
   vendor: Jenkins
+  technology:
+  - java
 - cve: CVE-2017-1000486
   technique: null
   provenance: kev:unmapped
@@ -946,11 +977,15 @@ mappings:
   kev: true
   ransomware: true
   vendor: Apache
+  technology:
+  - java
 - cve: CVE-2017-12617
   technique: T1505.003
   provenance: kev:cwe_bridge:CWE-434
   kev: true
   vendor: Apache
+  technology:
+  - java
 - cve: CVE-2017-15944
   technique: null
   provenance: kev:unmapped
@@ -1103,11 +1138,15 @@ mappings:
   provenance: kev:cwe_bridge:CWE-20
   kev: true
   vendor: Apache
+  technology:
+  - java
 - cve: CVE-2017-9805
   technique: T1059
   provenance: kev:cwe_bridge:CWE-502
   kev: true
   vendor: Apache
+  technology:
+  - java
 - cve: CVE-2017-9822
   technique: T1190
   provenance: kev:cwe_bridge:CWE-20
@@ -1355,6 +1394,9 @@ mappings:
   kev: true
   ransomware: true
   vendor: VMware Tanzu
+  technology:
+  - java
+  - java-spring
 - cve: CVE-2018-13374
   technique: null
   provenance: kev:unmapped
@@ -1427,6 +1469,8 @@ mappings:
   provenance: kev:cwe_bridge:CWE-502
   kev: true
   vendor: Laravel
+  technology:
+  - php
 - cve: CVE-2018-15376
   technique: T1574
   provenance: attack_to_cve:primary
@@ -2209,11 +2253,15 @@ mappings:
   provenance: kev:unmapped
   kev: true
   vendor: Jenkins
+  technology:
+  - java
 - cve: CVE-2019-1003030
   technique: null
   provenance: kev:unmapped
   kev: true
   vendor: Jenkins
+  technology:
+  - java
 - cve: CVE-2019-10068
   technique: T1059
   provenance: kev:cwe_bridge:CWE-502
@@ -2290,6 +2338,9 @@ mappings:
   provenance: kev:unmapped
   kev: true
   vendor: MongoDB
+  technology:
+  - express
+  - node
 - cve: CVE-2019-1086
   technique: T1068
   provenance: attack_to_cve:primary
@@ -2325,6 +2376,8 @@ mappings:
   kev: true
   ransomware: true
   vendor: PHP
+  technology:
+  - php
 - cve: CVE-2019-1106
   technique: T1574
   provenance: attack_to_cve:primary
@@ -3342,6 +3395,9 @@ mappings:
   provenance: kev:cwe_bridge:CWE-22
   kev: true
   vendor: Rails
+  technology:
+  - rails
+  - ruby
 - cve: CVE-2019-5544
   technique: T1203
   provenance: kev:cwe_bridge:CWE-787
@@ -3488,11 +3544,15 @@ mappings:
   provenance: kev:cwe_bridge:CWE-306
   kev: true
   vendor: ThinkPHP
+  technology:
+  - php
 - cve: CVE-2019-9082
   technique: T1059
   provenance: kev:cwe_bridge:CWE-94
   kev: true
   vendor: ThinkPHP
+  technology:
+  - php
 - cve: CVE-2019-9621
   technique: T1190
   provenance: kev:cwe_bridge:CWE-918
@@ -4374,11 +4434,15 @@ mappings:
   provenance: kev:unmapped
   kev: true
   vendor: Apache
+  technology:
+  - java
 - cve: CVE-2020-1938
   technique: null
   provenance: kev:unmapped
   kev: true
   vendor: Apache
+  technology:
+  - java
 - cve: CVE-2020-1956
   technique: T1059.004
   provenance: kev:cwe_bridge:CWE-78
@@ -5170,6 +5234,9 @@ mappings:
   provenance: kev:cwe_bridge:CWE-23
   kev: true
   vendor: VMware Tanzu
+  technology:
+  - java
+  - java-spring
 - cve: CVE-2020-5722
   technique: T1190
   provenance: kev:cwe_bridge:CWE-89
@@ -5530,6 +5597,8 @@ mappings:
   provenance: kev:cwe_bridge:CWE-78
   kev: true
   vendor: Npm package
+  technology:
+  - node
 - cve: CVE-2021-21551
   technique: null
   provenance: kev:unmapped
@@ -6101,6 +6170,8 @@ mappings:
   kev: true
   ransomware: true
   vendor: Laravel
+  technology:
+  - php
 - cve: CVE-2021-3156
   technique: T1203
   provenance: kev:cwe_bridge:CWE-122
@@ -6538,12 +6609,16 @@ mappings:
   kev: true
   ransomware: true
   vendor: Apache
+  technology:
+  - java
 - cve: CVE-2021-44228
   technique: T1059
   provenance: kev:cwe_bridge:CWE-502
   kev: true
   ransomware: true
   vendor: Apache
+  technology:
+  - java
 - cve: CVE-2021-44515
   technique: null
   provenance: kev:unmapped
@@ -6561,6 +6636,8 @@ mappings:
   kev: true
   ransomware: true
   vendor: Apache
+  technology:
+  - java
 - cve: CVE-2021-45382
   technique: T1059.004
   provenance: kev:cwe_bridge:CWE-78
@@ -6755,6 +6832,9 @@ mappings:
   provenance: kev:cwe_bridge:CWE-94
   kev: true
   vendor: VMware
+  technology:
+  - java
+  - java-spring
 - cve: CVE-2022-22948
   technique: null
   provenance: kev:unmapped
@@ -6776,11 +6856,17 @@ mappings:
   provenance: kev:cwe_bridge:CWE-94
   kev: true
   vendor: VMware Tanzu
+  technology:
+  - java
+  - java-spring
 - cve: CVE-2022-22965
   technique: T1059
   provenance: kev:cwe_bridge:CWE-94
   kev: true
   vendor: VMware
+  technology:
+  - java
+  - java-spring
 - cve: CVE-2022-23131
   technique: null
   provenance: kev:unmapped
@@ -6865,6 +6951,9 @@ mappings:
   provenance: kev:cwe_bridge:CWE-306
   kev: true
   vendor: Mitel
+  technology:
+  - express
+  - node
 - cve: CVE-2022-26258
   technique: T1059.004
   provenance: kev:cwe_bridge:CWE-78
@@ -8038,6 +8127,8 @@ mappings:
   kev: true
   ransomware: true
   vendor: Apache
+  technology:
+  - java
 - cve: CVE-2023-46747
   technique: T1078
   provenance: kev:cwe_bridge:CWE-288
@@ -8370,6 +8461,8 @@ mappings:
   kev: true
   ransomware: true
   vendor: Jenkins
+  technology:
+  - java
 - cve: CVE-2024-24919
   technique: T1083
   provenance: kev:cwe_bridge:CWE-200
@@ -8734,6 +8827,8 @@ mappings:
   kev: true
   ransomware: true
   vendor: PHP Group
+  technology:
+  - php
 - cve: CVE-2024-4610
   technique: T1203
   provenance: kev:cwe_bridge:CWE-416
@@ -9269,6 +9364,8 @@ mappings:
   provenance: kev:cwe_bridge:CWE-502
   kev: true
   vendor: Apache
+  technology:
+  - java
 - cve: CVE-2025-24893
   technique: T1059
   provenance: kev:cwe_bridge:CWE-95
@@ -9737,6 +9834,8 @@ mappings:
   provenance: kev:cwe_bridge:CWE-94
   kev: true
   vendor: Laravel
+  technology:
+  - php
 - cve: CVE-2025-5419
   technique: T1212
   provenance: kev:cwe_bridge:CWE-125
@@ -10180,11 +10279,15 @@ mappings:
   provenance: kev:cwe_bridge:CWE-20
   kev: true
   vendor: Apache
+  technology:
+  - java
 - cve: CVE-2026-34197
   technique: T1059
   provenance: kev:cwe_bridge:CWE-94
   kev: true
   vendor: Apache
+  technology:
+  - java
 - cve: CVE-2026-34621
   technique: null
   provenance: kev:unmapped

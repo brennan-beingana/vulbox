@@ -11,6 +11,8 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.art_test_result import ARTTestResult
 from app.models.trivy_finding import TrivyFinding
+from app.services.stack_detector import TechProfile
+from app.services.tech_profiles import techniques_for
 
 logger = get_logger(__name__)
 
@@ -65,6 +67,8 @@ def _ingest_mappings(
             m["ransomware"] = True
         if entry.get("provenance") and "provenance" not in m:
             m["provenance"] = entry["provenance"]
+        if entry.get("technology") and "technology" not in m:
+            m["technology"] = entry["technology"]
     return added
 
 
@@ -166,14 +170,22 @@ class ARTAdapter:
     @staticmethod
     def build_queue(
         trivy_findings: List[TrivyFinding],
+        tech_profile: Optional[TechProfile] = None,
     ) -> List[Tuple[str, Optional[int]]]:
         """Return ordered list of (technique_id, motivating_finding_id|None).
 
-        CVE-driven tests appear first and carry the finding_id of the CVE that
-        motivated them. Heuristic fallbacks then fill the queue based on what
-        the Trivy findings actually look like (severity profile + package
-        keywords), so two images with different vulnerability profiles get
-        different test queues.
+        Priority, highest first:
+          1. CVE-driven matches — a Trivy-confirmed CVE maps to a technique.
+             These carry the motivating finding_id (ransomware/KEV ranked up).
+          2. Stack-aware proactive bucket — techniques relevant to the detected
+             tech stack (tech_profile), queued even with no CVE flagging them.
+             Confirmed-present (bucket 1) beats inferred-from-stack.
+          3. Heuristic keyword fallbacks — fired by the findings' severity
+             profile + package keywords.
+
+        Deduped by technique across all buckets, so each technique runs once.
+        tech_profile is None/empty → queue degrades to the prior CVE+fallback
+        behavior. (Bucket 2 is skipped in dev mode, which replays a fixture.)
         """
         if settings.dev_mode:
             raw = json.loads(_DEV_FIXTURE.read_text())
@@ -200,14 +212,20 @@ class ARTAdapter:
         # Collect CVE-driven matches with priority signals, then emit in order:
         # ransomware-linked first, then KEV-listed, then everything else.
         # Stable sort within each bucket preserves the order findings arrived.
-        cve_driven: List[Tuple[int, str, Optional[int]]] = []
+        profile_tags = tech_profile.tags() if tech_profile else set()
+        cve_driven: List[Tuple[tuple, str, Optional[int]]] = []
         for idx, finding in enumerate(trivy_findings):
             technique = _CVE_TECHNIQUE_MAP.get(finding.cve_id)
             if not technique:
                 continue
             meta = _CVE_METADATA.get(finding.cve_id, {})
+            # A CVE whose tagged technology matches the detected stack is the
+            # strongest signal — confirmed-present *and* stack-relevant — so it
+            # leads the queue, ahead of even ransomware/KEV-flagged CVEs.
+            stack_relevant = bool(profile_tags & set(meta.get("technology") or []))
             # Lower tuple = higher priority.
             rank = (
+                0 if stack_relevant else 1,
                 0 if meta.get("ransomware") else 1,
                 0 if meta.get("kev") else 1,
                 idx,
@@ -220,6 +238,17 @@ class ARTAdapter:
                 continue
             priority.append((technique, fid))
             seen_techniques.add(technique)
+
+        # Stack-aware proactive bucket — techniques relevant to the detected
+        # tech stack, even when no CVE flagged them. Sits below CVE-driven
+        # matches (confirmed-present beats inferred) and above generic
+        # keyword fallbacks. No motivating finding, hence None.
+        if tech_profile is not None and not tech_profile.is_empty():
+            for technique in techniques_for(tech_profile.tags()):
+                if technique in seen_techniques:
+                    continue
+                priority.append((technique, None))
+                seen_techniques.add(technique)
 
         # Heuristic fallbacks — fired by signal, not a fixed list.
         for rule in _FALLBACK_RULES:

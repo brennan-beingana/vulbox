@@ -1,0 +1,68 @@
+# Vendor/product → technology tag normalization for CVE tagging.
+#
+# Used by scripts/build_cve_map.py to derive a `technology` list for each KEV
+# CVE from its (vendorProject, product) strings. Each alias `match` is a
+# case-insensitive substring tested against "<vendor> <product>"; every alias
+# that matches contributes its tags (unioned, deduped).
+#
+# Tags MUST align with the canonical tags StackDetector emits (python, node,
+# java, java-spring, go, ruby, rails, php, django, flask, fastapi, express, ...)
+# so build_queue can intersect a CVE's technology with the detected stack and
+# promote stack-relevant CVEs.
+
+aliases:
+  # Python
+  - match: "django"
+    tags: [python, django]
+  - match: "flask"
+    tags: [python, flask]
+  - match: "fastapi"
+    tags: [python, fastapi]
+  - match: "tornado"
+    tags: [python]
+  - match: "python"
+    tags: [python]
+
+  # Node / JavaScript
+  - match: "node.js"
+    tags: [node]
+  - match: "nodejs"
+    tags: [node]
+  - match: "express"
+    tags: [node, express]
+  - match: "npm package"
+    tags: [node]
+
+  # Java / JVM
+  - match: "spring"
+    tags: [java, java-spring]
+  - match: "tomcat"
+    tags: [java]
+  - match: "struts"
+    tags: [java]
+  - match: "log4j"
+    tags: [java]
+  - match: "jenkins"
+    tags: [java]
+  - match: "activemq"
+    tags: [java]
+  - match: "java"
+    tags: [java]
+
+  # Ruby
+  - match: "rails"
+    tags: [ruby, rails]
+  - match: "ruby"
+    tags: [ruby]
+
+  # PHP
+  - match: "laravel"
+    tags: [php]
+  - match: "phpmailer"
+    tags: [php]
+  - match: "phpunit"
+    tags: [php]
+  - match: "phpmyadmin"
+    tags: [php]
+  - match: "php"
+    tags: [php]

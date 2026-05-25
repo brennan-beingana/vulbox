@@ -39,6 +39,7 @@ SOURCES = ROOT / "data" / "sources"
 KEV_PATH = SOURCES / "kev.json"
 ATC_PATH = SOURCES / "attack_to_cve.csv"
 CWE_PATH = ROOT / "data" / "cwe_technique_map.yml"
+ALIASES_PATH = ROOT / "data" / "tech_aliases.yml"
 OUT_PATH = ROOT / "data" / "cve_technique_map.generated.yml"
 
 _PROV_RANK = {"primary": 0, "secondary": 1, "exploitation": 2, "cwe_bridge": 3}
@@ -56,6 +57,32 @@ def load_cwe_bridge() -> Dict[str, List[str]]:
         if cwe and tech:
             bridge.setdefault(cwe, []).append(tech)
     return bridge
+
+
+def load_tech_aliases() -> List[tuple]:
+    """Return [(match_substring_lower, [tags])] from the alias file."""
+    if not ALIASES_PATH.is_file():
+        return []
+    data = yaml.safe_load(ALIASES_PATH.read_text()) or {}
+    out: List[tuple] = []
+    for entry in data.get("aliases", []) or []:
+        match = (entry.get("match") or "").strip().lower()
+        tags = [t for t in (entry.get("tags") or []) if t]
+        if match and tags:
+            out.append((match, tags))
+    return out
+
+
+def derive_technology(vendor, product, aliases: List[tuple]) -> List[str]:
+    """Union the tags of every alias whose substring is in '<vendor> <product>'."""
+    haystack = f"{vendor or ''} {product or ''}".lower()
+    tags: List[str] = []
+    for match, alias_tags in aliases:
+        if match in haystack:
+            for t in alias_tags:
+                if t not in tags:
+                    tags.append(t)
+    return sorted(tags)
 
 
 def load_kev() -> Dict[str, dict]:
@@ -108,6 +135,7 @@ def build_entries(
     atc_rows: List[dict],
     kev: Dict[str, dict],
     cwe_bridge: Dict[str, List[str]],
+    aliases: List[tuple],
 ) -> List[dict]:
     """Emit one entry per unique (CVE, technique).
 
@@ -137,6 +165,9 @@ def build_entries(
             entry["ransomware"] = True
         if meta["vendor"]:
             entry["vendor"] = meta["vendor"]
+        technology = derive_technology(meta.get("vendor"), meta.get("product"), aliases)
+        if technology:
+            entry["technology"] = technology
 
     def add(cve: str, tech: str, provenance: str) -> None:
         key = (cve, tech)
@@ -217,6 +248,7 @@ def write_yaml(entries: List[dict], stats: dict) -> None:
                 "unique_techniques": stats["unique_techniques"],
                 "kev_bridged": stats["kev_bridged"],
                 "kev_unmapped": stats["kev_unmapped"],
+                "cves_with_technology": stats["cves_with_technology"],
             },
         },
         "mappings": entries,
@@ -239,7 +271,8 @@ def main() -> int:
     kev = load_kev()
     atc = load_attack_to_cve()
     cwe_bridge = load_cwe_bridge()
-    entries = build_entries(atc, kev, cwe_bridge)
+    aliases = load_tech_aliases()
+    entries = build_entries(atc, kev, cwe_bridge, aliases)
 
     actionable = [e for e in entries if e["technique"]]
     unmapped = [e for e in entries if not e["technique"]]
@@ -255,6 +288,9 @@ def main() -> int:
         "kev_bridged": sum(
             1 for e in actionable if e["provenance"].startswith("kev:cwe_bridge")
         ),
+        "cves_with_technology": len(
+            {e["cve"] for e in actionable if e.get("technology")}
+        ),
     }
 
     write_yaml(entries, stats)
@@ -265,6 +301,7 @@ def main() -> int:
         f"  unique techniques:     {stats['unique_techniques']}\n"
         f"  entries on KEV:        {stats['entries_on_kev']}\n"
         f"  via CWE bridge:        {stats['kev_bridged']}\n"
+        f"  CVEs w/ technology:    {stats['cves_with_technology']}\n"
         f"  KEV residual unmapped: {stats['kev_unmapped']}\n"
         f"  KEV catalog total:     {stats['kev_total']}\n"
         f"  attack_to_cve rows:    {stats['atc_total']}\n"
