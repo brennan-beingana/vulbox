@@ -60,14 +60,21 @@ export default function Report() {
     );
   }
 
+  const maxRisk = report.security_matrix.length > 0
+    ? Math.max(...report.security_matrix.map(e => e.risk_score))
+    : null;
+
   return (
     <Layout title={`Report — ${report.project_name}`} breadcrumb="Reports">
-      {/* Header row */}
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <div>
-          <div className="text-muted text-sm">
-            Run #{report.run_id} · {report.image_tag} · {report.status}
-          </div>
+      {/* Toolbar: metadata chips + export actions */}
+      <div className="report-toolbar">
+        <div className="report-meta">
+          <span className="meta-chip"><span className="meta-key">Run</span> #{report.run_id}</span>
+          <span className="meta-chip"><span className="meta-key">Image</span> <code>{report.image_tag}</code></span>
+          <span className="meta-chip">
+            <span className="meta-key">Status</span>
+            <span className={`badge ${report.status === 'COMPLETE' ? 'badge-success' : 'badge-neutral'}`}>{report.status}</span>
+          </span>
         </div>
         <div className="flex gap-3">
           <button onClick={() => exportFile('csv')} className="btn btn-secondary btn-sm">
@@ -98,12 +105,9 @@ export default function Report() {
         </div>
         <div className="stat-card">
           <div className="stat-label">Max Risk Score</div>
-          <div className="stat-value" style={{ color: riskColor(Math.max(0, ...report.security_matrix.map(e => e.risk_score))) }}>
-            {report.security_matrix.length > 0
-              ? Math.max(...report.security_matrix.map(e => e.risk_score))
-              : '—'
-            }
-            {report.security_matrix.length > 0 && <span style={{ fontSize: '1rem', fontWeight: 400, color: 'var(--text-muted)' }}>/75</span>}
+          <div className="stat-value" style={{ color: maxRisk !== null ? riskColor(maxRisk) : 'var(--text)' }}>
+            {maxRisk !== null ? maxRisk : '—'}
+            {maxRisk !== null && <span className="text-muted" style={{ fontSize: '1rem', fontWeight: 500 }}>/75</span>}
           </div>
           <div className="stat-trend">Highest entry score</div>
         </div>
@@ -112,41 +116,42 @@ export default function Report() {
       {/* Executive Summary */}
       {report.executive_summary && (
         <div className="page-section">
-          <div className="section-heading">
-            Executive Summary{' '}
+          <div className="rep-section-head">
+            <h2>Executive Summary</h2>
             <span className={`badge ${report.executive_summary.generated_by === 'llm' ? 'badge-info' : 'badge-neutral'}`}>
               {report.executive_summary.generated_by === 'llm' ? '✨ AI-generated' : 'rule-based'}
             </span>
           </div>
-          <div className="remediation-card">
-            <div className="rem-header">
-              <div className="rem-summary" style={{ fontSize: '1.05rem' }}>
-                {report.executive_summary.headline}
-              </div>
+          <div className="exec-summary">
+            <div className="exec-top">
+              <div className="exec-headline">{report.executive_summary.headline}</div>
               <span className={`badge ${confidenceBadge(report.executive_summary.confidence)}`}>
                 {report.executive_summary.confidence}
               </span>
             </div>
-            <div className="rem-body">
-              <p>{report.executive_summary.overall_posture}</p>
-              {report.executive_summary.top_priorities.length > 0 && (
-                <>
-                  <p><strong>Top priorities:</strong></p>
-                  <ol>
-                    {report.executive_summary.top_priorities.map((p, i) => (
-                      <li key={i}>{p}</li>
-                    ))}
-                  </ol>
-                </>
-              )}
-            </div>
+            <p className="exec-posture">{report.executive_summary.overall_posture}</p>
+            {report.executive_summary.top_priorities.length > 0 && (
+              <>
+                <div className="exec-priorities-label">Top priorities</div>
+                <ol className="exec-priorities">
+                  {report.executive_summary.top_priorities.map((p, i) => (
+                    <li key={i}><span className="pri-num">{i + 1}</span><span>{p}</span></li>
+                  ))}
+                </ol>
+              </>
+            )}
           </div>
         </div>
       )}
 
       {/* Security Matrix */}
       <div className="page-section">
-        <div className="section-heading">Security Matrix</div>
+        <div className="rep-section-head">
+          <h2>Security Matrix</h2>
+          {report.security_matrix.length > 0 && (
+            <span className="rep-count">{report.security_matrix.length}</span>
+          )}
+        </div>
         <div className="table-wrap">
           {report.security_matrix.length === 0 ? (
             <div className="empty-state">
@@ -169,9 +174,7 @@ export default function Report() {
                 {report.security_matrix.map(e => (
                   <tr key={e.entry_id}>
                     <td>
-                      <code style={{ fontSize: '0.8125rem', background: 'var(--bg)', padding: '0.125rem 0.375rem', borderRadius: 5 }}>
-                        {e.mitre_tactic_id || '—'}
-                      </code>
+                      <code className="id-tag">{e.mitre_tactic_id || '—'}</code>
                     </td>
                     <td>
                       <BoolCell
@@ -211,38 +214,47 @@ export default function Report() {
       {/* Remediations */}
       {report.remediations.length > 0 && (
         <div className="page-section">
-          <div className="section-heading">Remediation Actions</div>
+          <div className="rep-section-head">
+            <h2>Remediation Actions</h2>
+            <span className="rep-count">{report.remediations.length}</span>
+          </div>
           {report.remediations.map(r => (
-            <div key={r.id} className="remediation-card">
+            <div key={r.id} className={`rem-card acc-${r.confidence}`}>
               <div className="rem-header">
                 <div className="rem-summary">{r.summary}</div>
-                <span style={{ display: 'flex', gap: '0.375rem', alignItems: 'center' }}>
+                <span className="rem-badges">
                   <span className={`badge ${r.generated_by === 'llm' ? 'badge-info' : 'badge-neutral'}`}>
                     {r.generated_by === 'llm' ? '✨ AI' : 'rule'}
                   </span>
                   <span className={`badge ${confidenceBadge(r.confidence)}`}>{r.confidence}</span>
                 </span>
               </div>
-              <div className="rem-body">
-                <p><strong>Priority action:</strong> {r.priority_action}</p>
-                <p><strong>Why it matters:</strong> {r.why_it_matters}</p>
-                {r.example_fix && (
-                  <div className="code-block">{r.example_fix}</div>
-                )}
-                {r.references && r.references.trim() && (
-                  <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-                    <strong>References:</strong>{' '}
-                    {r.references.split('\n').filter(Boolean).map((ref, i) => (
-                      <span key={i}>
-                        {i > 0 && ' · '}
-                        {/^https?:\/\//.test(ref)
-                          ? <a href={ref} target="_blank" rel="noreferrer">{ref}</a>
-                          : ref}
-                      </span>
-                    ))}
-                  </p>
-                )}
+              <div className="rem-field">
+                <span className="rem-field-label">Priority action</span>
+                <span className="rem-field-val">{r.priority_action}</span>
               </div>
+              <div className="rem-field">
+                <span className="rem-field-label">Why it matters</span>
+                <span className="rem-field-val">{r.why_it_matters}</span>
+              </div>
+              {r.example_fix && (
+                <div className="rem-field">
+                  <span className="rem-field-label">Example fix</span>
+                  <div className="code-block">{r.example_fix}</div>
+                </div>
+              )}
+              {r.references && r.references.trim() && (
+                <div className="rem-field">
+                  <span className="rem-field-label">References</span>
+                  <div className="rem-refs">
+                    {r.references.split('\n').filter(Boolean).map((ref, i) => (
+                      /^https?:\/\//.test(ref)
+                        ? <a key={i} className="ref-chip" href={ref} target="_blank" rel="noreferrer">{ref}</a>
+                        : <span key={i} className="ref-chip">{ref}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
