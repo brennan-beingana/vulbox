@@ -107,6 +107,12 @@ def export_report(
                 status_code=501,
                 media_type="text/plain",
             )
+        except Exception as exc:  # noqa: BLE001 — surface render failures cleanly
+            return Response(
+                content=f"PDF generation failed: {exc}",
+                status_code=500,
+                media_type="text/plain",
+            )
 
 
 def _render_pdf_html(run, matrix) -> str:

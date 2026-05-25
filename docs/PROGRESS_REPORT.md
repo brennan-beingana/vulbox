@@ -1,6 +1,6 @@
 # VulBox — Development Progress Report
 
-**Status snapshot:** 2026-04-30
+**Status snapshot:** 2026-04-30 (original) — see §11 for 2026-05-17 addendum
 **Author:** Engineering team
 **Audience:** Project supervisor / stakeholders / next maintainer
 **Project root:** `/home/bbei/Desktop/vulbox`
@@ -331,6 +331,56 @@ Until then, VulBox is best framed as **what it actually is**: a working proof-of
 | `app/api/runs.py` & `reports.py` | Where auth needs to be added |
 | `tests/` | What is and isn't being verified |
 | `docker/docker-compose.yml` | Production deployment target |
+
+---
+
+## 11. Addendum — 2026-05-17 Sprint 6 Status Update
+
+Two and a half weeks after the original report. This section is additive — the audit findings above still describe the system honestly; what follows is the delta.
+
+### 11.1 What landed in May 2026
+
+| Area | Change | Effect on maturity |
+|---|---|---|
+| **CVE → MITRE map** | Curated 55 + generated 2017 entries, merged to **1,465 unique CVEs**, **1,060 KEV-flagged**. Fallback rules grew 4 → 7 and are now signal-driven (image-shape aware). | Sprint 4 §4.3 goal of "more populated technique map" is substantially advanced. The map is no longer the bottleneck. |
+| **Atomic Red Team catalog** | Real ART repo content vendored under `data/sources/atomics/` (pinned SHA `37400ed6`), exposed via `scanners/atomic_catalog.py`. **17 techniques, 88 Linux atomic tests** (was 13 hand-written bash bodies). New `scanners/atomic_runner.py` selects a Linux-supported test and falls back to the old bash script when none applies. | Coverage breadth nearly doubled. Tests are now community-maintained rather than hand-written. |
+| **Ground-truth E2E harness** | `scripts/validate_e2e.py` (425 LOC) + `tests/ground_truth/manifest.yml` (3 control cases: `alpine:3.20`, `alpine:3.5`, `debian:8`). Emits `docs/validation_report.md`. | Sprint 2 §4.1 infrastructure now exists. **But the harness has not been executed against real Docker yet** — the report still reads "No results yet." |
+| **E2E pytest scaffold** | `tests/e2e/test_full_pipeline.py` + a `vulnerable_target/` Dockerfile (Node Express). Conftest fixtures spin up the orchestrator in dev mode. | Integration-test slot is wired; real-Docker execution still pending on a CI runner with Docker. |
+| **Demo tooling** | `scripts/seed_demo_data.py`, `scripts/demo_reset.sh`, `docs/DEMO_RUNBOOK.md` (T-24h/T-1h/T-0 checklist). | The "live demo" failure mode (`it worked on my laptop`) now has a defensible procedure. |
+| **CI workflows** | `.github/workflows/ci.yml` (real) and `security-assessment.yml`. | The "sample-only" gap in §5.9 is partially closed for unit tests; integration jobs are still aspirational. |
+| **Test count** | 50 → **69 passing**, all green (`pytest tests/ -q`). New suites: `test_atomic_catalog.py`, `test_cve_map.py`, `test_ground_truth_static.py`. | Unit confidence improves; the underlying caveat (no real subprocesses exercised) is unchanged. |
+
+### 11.2 What's still unchanged (gaps from §4–5 that remain open)
+
+- **Auth on data plane.** Verified 2026-05-17: `get_current_user` still appears only in `app/api/auth.py`. `runs.py`, `reports.py`, `ingest.py`, `websocket.py` all accept unauthenticated callers. §5.1 stands.
+- **No `user_id` FK on `AssessmentRun`.** Verified against `app/models/run.py` — model unchanged. §5.2 stands.
+- **No `error_message` column.** Run failures still surface as "check server logs." §5.6 stands.
+- **Hardcoded frontend API base.** `frontend/src/api.js` and `frontend/src/pages/Report.jsx` still pin `http://46.101.193.155:8000`. §5.8 stands.
+- **No Alembic migrations.** `Base.metadata.create_all` is still authoritative. §5.4 stands.
+- **No runtime consent re-check** in `_phase_test_loop()`. §6.2 stands.
+- **LLM golden-set** not built. §4.2 stands.
+- **Per-app `.vulbox.yml`** not built. §4.4 stands.
+- **Ground-truth harness** has not been executed on a Docker-enabled host. §11.1 above.
+
+### 11.3 Updated headline numbers
+
+| Metric | 2026-04-30 | 2026-05-17 |
+|---|---:|---:|
+| MITRE techniques in runner / catalog | 13 | **17 (+88 atomic tests vendored)** |
+| MITRE techniques in CVE map | 12 | substantially more (curated 55; generated covers many more) |
+| Unique CVEs in map | 55 | **1,465** |
+| KEV-flagged CVEs | 0 (not tracked) | **1,060** |
+| Tactics covered | 7 | broadly similar — gain is depth, not breadth |
+| Tests passing | 50 / 50 | **69 / 70** (1 deselected by marker) |
+| Tests that exercise real subprocesses | 0 | 0 (harness exists, has not been run) |
+| REST endpoints with auth enforcement | 1 of 14 | 1 of 14 |
+| Hardcoded URLs in frontend | 2 | 2 |
+
+### 11.4 Revised assessment
+
+The May 2026 work moved the needle on **technique coverage** and **test infrastructure**. It did **not** move the needle on the three blocking gaps for external use: **auth, user scoping, and per-app configuration**. The shape of the roadmap in §8 is unchanged — Sprint 1 (security) is now overdue, Sprint 2 (E2E proof) has infrastructure ready but no green runs, Sprints 3–5 are still in front of the team.
+
+The honest one-line status as of 2026-05-17: **"the data spine is now wide enough to support a real run; the security and configurability work that lets a stranger trust it has not been started."**
 
 ---
 
