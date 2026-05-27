@@ -24,19 +24,44 @@ from app.schemas.report import (
 from app.services.run_service import RunService
 
 
+# Critical → low ordering. Higher rank sorts first; entries with no motivating
+# finding (proactive/fallback) fall to the bottom of their risk band.
+_SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "unknown": 0}
+
+
 def _matrix_schema(entry: SecurityMatrixEntry, findings_by_id: dict) -> SecurityMatrixEntrySchema:
-    """Enrich a matrix entry with its motivating CVE id, EPSS score, provenance."""
+    """Enrich a matrix entry with its motivating CVE id, severity, EPSS, provenance."""
     from app.adapters.art_adapter import _CVE_TECHNIQUE_MAP
 
     schema = SecurityMatrixEntrySchema.model_validate(entry)
     finding = findings_by_id.get(entry.finding_id)
     if finding is not None:
         schema.cve_id = finding.cve_id
+        schema.severity = (getattr(finding, "severity", None) or "unknown").lower()
         schema.epss_score = finding.epss_score
         # Direct CVE→technique mapping vs. the coarser CWE-bridge fallback.
         schema.match_source = (
             "cve-map" if finding.cve_id in _CVE_TECHNIQUE_MAP else "cwe-bridge"
         )
+    return schema
+
+
+def _entry_sort_key(entry: SecurityMatrixEntry, findings_by_id: dict) -> tuple:
+    """Sort key for critical→low ordering: (severity_rank, risk_score), desc."""
+    finding = findings_by_id.get(entry.finding_id)
+    sev = (getattr(finding, "severity", None) or "unknown").lower() if finding is not None else "unknown"
+    return (_SEVERITY_RANK.get(sev, 0), entry.risk_score or 0)
+
+
+def _rem_schema(rem, entries_by_id: dict, findings_by_id: dict) -> RemediationResponseSchema:
+    """Enrich a remediation with its matrix entry's severity + risk for filtering."""
+    schema = RemediationResponseSchema.model_validate(rem)
+    entry = entries_by_id.get(rem.matrix_entry_id)
+    if entry is not None:
+        schema.risk_score = entry.risk_score
+        finding = findings_by_id.get(entry.finding_id)
+        if finding is not None:
+            schema.severity = (getattr(finding, "severity", None) or "unknown").lower()
     return schema
 
 
@@ -76,16 +101,29 @@ router = APIRouter(prefix="/reports", tags=["reporting"])
 def get_report(run_id: int, db: Session = Depends(get_db)):
     run = RunService.get_run(db, run_id)
 
+    findings = db.query(TrivyFinding).filter(TrivyFinding.run_id == run_id).all()
+    findings_by_id = {f.finding_id: f for f in findings}
+
     matrix = (
         db.query(SecurityMatrixEntry)
         .filter(SecurityMatrixEntry.run_id == run_id)
         .all()
     )
-    findings = db.query(TrivyFinding).filter(TrivyFinding.run_id == run_id).all()
-    findings_by_id = {f.finding_id: f for f in findings}
+    # Critical → low: severity band first, then risk score within it.
+    matrix.sort(key=lambda e: _entry_sort_key(e, findings_by_id), reverse=True)
+
     remediations = (
         db.query(Remediation).filter(Remediation.run_id == run_id).all()
     )
+    # Remediation cards follow the same critical→low order as the matrix, and
+    # carry their entry's severity/risk so the frontend can filter them.
+    entries_by_id = {e.entry_id: e for e in matrix}
+
+    def _rem_sort_key(r: Remediation) -> tuple:
+        e = entries_by_id.get(r.matrix_entry_id)
+        return _entry_sort_key(e, findings_by_id) if e is not None else (0, 0)
+
+    remediations.sort(key=_rem_sort_key, reverse=True)
     trivy_count = len(findings)
     art_count = (
         db.query(ARTTestResult).filter(ARTTestResult.run_id == run_id).count()
@@ -107,7 +145,9 @@ def get_report(run_id: int, db: Session = Depends(get_db)):
         remediations_count=len(remediations),
         detected_technologies=[DetectedTechnologySchema.model_validate(t) for t in technologies],
         security_matrix=[_matrix_schema(e, findings_by_id) for e in matrix],
-        remediations=[RemediationResponseSchema.model_validate(r) for r in remediations],
+        remediations=[
+            _rem_schema(r, entries_by_id, findings_by_id) for r in remediations
+        ],
         executive_summary=_load_executive_summary(db, run_id),
         coverage=_coverage(findings, matrix),
         created_at=run.created_at,
@@ -121,13 +161,14 @@ def export_report(
     db: Session = Depends(get_db),
 ):
     run = RunService.get_run(db, run_id)
+    findings = db.query(TrivyFinding).filter(TrivyFinding.run_id == run_id).all()
+    findings_by_id = {f.finding_id: f for f in findings}
     matrix = (
         db.query(SecurityMatrixEntry)
         .filter(SecurityMatrixEntry.run_id == run_id)
         .all()
     )
-    findings = db.query(TrivyFinding).filter(TrivyFinding.run_id == run_id).all()
-    findings_by_id = {f.finding_id: f for f in findings}
+    matrix.sort(key=lambda e: _entry_sort_key(e, findings_by_id), reverse=True)
 
     if format == "json":
         # Reuse the standard report endpoint
@@ -139,15 +180,16 @@ def export_report(
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow(
-            ["entry_id", "mitre_tactic_id", "cve_id", "epss_score", "is_present",
-             "is_exploitable", "is_detectable", "risk_score", "finding_id",
-             "test_result_id"]
+            ["entry_id", "mitre_tactic_id", "cve_id", "severity", "epss_score",
+             "is_present", "is_exploitable", "is_detectable", "risk_score",
+             "finding_id", "test_result_id"]
         )
         for e in matrix:
             f = findings_by_id.get(e.finding_id)
             writer.writerow([
                 e.entry_id, e.mitre_tactic_id,
-                f.cve_id if f else "", f.epss_score if f else "",
+                f.cve_id if f else "", f.severity if f else "",
+                f.epss_score if f else "",
                 e.is_present, e.is_exploitable,
                 e.is_detectable, e.risk_score, e.finding_id, e.test_result_id,
             ])
@@ -161,6 +203,14 @@ def export_report(
     if format == "pdf":
         remediations = (
             db.query(Remediation).filter(Remediation.run_id == run_id).all()
+        )
+        entries_by_id = {e.entry_id: e for e in matrix}
+        remediations.sort(
+            key=lambda r: (
+                _entry_sort_key(entries_by_id[r.matrix_entry_id], findings_by_id)
+                if r.matrix_entry_id in entries_by_id else (0, 0)
+            ),
+            reverse=True,
         )
         summary = _load_executive_summary(db, run_id)
         technologies = (
@@ -317,16 +367,29 @@ def _render_pdf_html(
         color = "#dc2626" if score >= 0.50 else "#111827"
         return f"<span style='font-weight:{weight};color:{color};'>{score * 100:.1f}%</span>"
 
+    def _sev_cell(sev) -> str:
+        if not sev:
+            return "<span style='color:#9ca3af;'>—</span>"
+        color = {"critical": "#dc2626", "high": "#ea580c", "medium": "#d97706", "low": "#059669"}.get(
+            sev.lower(), "#6b7280"
+        )
+        return (
+            f"<span style='display:inline-block;background:{color};color:#fff;font-size:8px;"
+            f"font-weight:700;text-transform:uppercase;padding:2px 7px;border-radius:9999px;'>{esc(sev)}</span>"
+        )
+
     rows = ""
     for e in matrix:
         f = findings_by_id.get(e.finding_id)
         cve = f.cve_id if f else None
+        sev = f.severity if f else None
         epss = f.epss_score if f else None
         rows += (
             "<tr>"
             f"<td><span style='font-family:{_PDF_MONO};font-size:10px;background:#f0f2f8;"
             f"border:1px solid #e4e8f0;border-radius:5px;padding:2px 6px;'>{esc(e.mitre_tactic_id or '—')}</span></td>"
             f"<td><span style='font-family:{_PDF_MONO};font-size:9.5px;color:#4b5563;'>{esc(cve or '—')}</span></td>"
+            f"<td>{_sev_cell(sev)}</td>"
             f"<td>{_epss_cell(epss)}</td>"
             f"<td>{_yn(e.is_present, '#111827', '#9ca3af')}</td>"
             f"<td>{_yn(e.is_exploitable)}</td>"
@@ -425,7 +488,7 @@ def _render_pdf_html(
     {summary_html}
     <div class="section-label">Security Matrix</div>
     {coverage_html}
-    <table class="matrix"><tr><th>MITRE Tactic</th><th>CVE</th><th>EPSS</th><th>Present</th>
+    <table class="matrix"><tr><th>MITRE Tactic</th><th>CVE</th><th>Severity</th><th>EPSS</th><th>Present</th>
     <th>Exploitable</th><th>Detectable</th><th>Risk Score</th></tr>{rows}</table>
     {rem_html}
     </body></html>"""

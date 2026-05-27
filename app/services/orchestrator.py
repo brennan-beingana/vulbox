@@ -272,7 +272,7 @@ async def _phase_test_loop(
     tech_profile: Optional[TechProfile] = None,
 ) -> None:
     queue: List[Tuple[str, List[int]]] = await asyncio.to_thread(
-        ARTAdapter.build_queue, trivy_findings, tech_profile
+        ARTAdapter.build_queue, trivy_findings, tech_profile, run.min_severity
     )
     findings_by_id: Dict[int, TrivyFinding] = {f.finding_id: f for f in trivy_findings}
     rebuilds = 0

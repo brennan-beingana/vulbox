@@ -22,6 +22,8 @@ class AssessmentRun(Base):
     status: Mapped[str] = mapped_column(String(50), default="SUBMITTED")
     submitted_by: Mapped[str] = mapped_column(String(200), default="")
     consent_granted: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Minimum CVE severity attributed an exploitability row (caps report size).
+    min_severity: Mapped[str] = mapped_column(String(20), default="high")
     started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -17,6 +17,21 @@ function confidenceBadge(c) {
   return map[c] || 'badge-neutral';
 }
 
+const SEVERITY_RANK = { critical: 4, high: 3, medium: 2, low: 1, unknown: 0 };
+const SEVERITY_COLOR = { critical: '#dc2626', high: '#ea580c', medium: '#d97706', low: '#059669' };
+
+function SeverityCell({ severity }) {
+  if (!severity) return <span className="text-muted">—</span>;
+  return (
+    <span
+      className="badge"
+      style={{ color: '#fff', background: SEVERITY_COLOR[severity] || '#6b7280', textTransform: 'capitalize' }}
+    >
+      {severity}
+    </span>
+  );
+}
+
 function BoolCell({ value, trueLabel = '✓ Yes', falseLabel = '✗ No', trueColor = 'var(--danger)', falseColor = 'var(--success)' }) {
   return (
     <span style={{ fontWeight: 700, color: value ? trueColor : falseColor }}>
@@ -29,6 +44,9 @@ export default function Report() {
   const { runId } = useParams();
   const [report, setReport] = useState(null);
   const [error, setError] = useState('');
+  // Shared filter for the matrix table + remediation cards (client-side).
+  const [minSeverity, setMinSeverity] = useState('all');
+  const [minRisk, setMinRisk] = useState(0);
 
   useEffect(() => {
     api.get(`/reports/${runId}`)
@@ -63,6 +81,56 @@ export default function Report() {
   const maxRisk = report.security_matrix.length > 0
     ? Math.max(...report.security_matrix.map(e => e.risk_score))
     : null;
+
+  const sevThreshold = minSeverity === 'all' ? 0 : SEVERITY_RANK[minSeverity];
+  const passesFilter = (severity, risk) =>
+    (risk ?? 0) >= minRisk &&
+    (SEVERITY_RANK[severity] ?? 0) >= sevThreshold;
+
+  const filteredMatrix = report.security_matrix.filter(e => passesFilter(e.severity, e.risk_score));
+  const filteredRemediations = report.remediations.filter(r => passesFilter(r.severity, r.risk_score));
+  const filtersActive = minSeverity !== 'all' || minRisk > 0;
+
+  const filterBar = (
+    <div className="report-toolbar" style={{ gap: '1.25rem', flexWrap: 'wrap' }}>
+      <div className="flex items-center gap-3" style={{ flexWrap: 'wrap' }}>
+        <span className="form-label" style={{ margin: 0 }}>Min severity</span>
+        <select
+          className="form-input"
+          style={{ width: 'auto', textTransform: 'capitalize' }}
+          value={minSeverity}
+          onChange={e => setMinSeverity(e.target.value)}
+        >
+          <option value="all">All</option>
+          <option value="critical">Critical</option>
+          <option value="high">High &amp; above</option>
+          <option value="medium">Medium &amp; above</option>
+          <option value="low">Low &amp; above</option>
+        </select>
+      </div>
+      <div className="flex items-center gap-3">
+        <span className="form-label" style={{ margin: 0 }}>Min risk score</span>
+        <input
+          type="range"
+          min="0"
+          max="75"
+          step="5"
+          value={minRisk}
+          onChange={e => setMinRisk(Number(e.target.value))}
+          style={{ accentColor: riskColor(minRisk || 0) }}
+        />
+        <span className="risk-chip" style={{ background: riskColor(minRisk || 0) }}>{minRisk}/75</span>
+      </div>
+      {filtersActive && (
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={() => { setMinSeverity('all'); setMinRisk(0); }}
+        >
+          Clear filters
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <Layout title={`Report — ${report.project_name}`} breadcrumb="Reports">
@@ -144,12 +212,19 @@ export default function Report() {
         </div>
       )}
 
+      {/* Filter bar (applies to matrix + remediations) */}
+      {(report.security_matrix.length > 0 || report.remediations.length > 0) && filterBar}
+
       {/* Security Matrix */}
       <div className="page-section">
         <div className="rep-section-head">
           <h2>Security Matrix</h2>
           {report.security_matrix.length > 0 && (
-            <span className="rep-count">{report.security_matrix.length}</span>
+            <span className="rep-count">
+              {filtersActive
+                ? `${filteredMatrix.length} / ${report.security_matrix.length}`
+                : report.security_matrix.length}
+            </span>
           )}
         </div>
         <div className="table-wrap">
@@ -159,11 +234,18 @@ export default function Report() {
               <h3>No matrix entries</h3>
               <p>The assessment may still be running or no findings were correlated.</p>
             </div>
+          ) : filteredMatrix.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-state-icon">🧹</div>
+              <h3>No entries match the filter</h3>
+              <p>Lower the minimum severity or risk score to see more.</p>
+            </div>
           ) : (
             <table className="matrix-table">
               <thead>
                 <tr>
                   <th>MITRE Tactic</th>
+                  <th>Severity</th>
                   <th>Present</th>
                   <th>Exploitable</th>
                   <th>Detectable</th>
@@ -171,10 +253,13 @@ export default function Report() {
                 </tr>
               </thead>
               <tbody>
-                {report.security_matrix.map(e => (
+                {filteredMatrix.map(e => (
                   <tr key={e.entry_id}>
                     <td>
                       <code className="id-tag">{e.mitre_tactic_id || '—'}</code>
+                    </td>
+                    <td>
+                      <SeverityCell severity={e.severity} />
                     </td>
                     <td>
                       <BoolCell
@@ -216,9 +301,19 @@ export default function Report() {
         <div className="page-section">
           <div className="rep-section-head">
             <h2>Remediation Actions</h2>
-            <span className="rep-count">{report.remediations.length}</span>
+            <span className="rep-count">
+              {filtersActive
+                ? `${filteredRemediations.length} / ${report.remediations.length}`
+                : report.remediations.length}
+            </span>
           </div>
-          {report.remediations.map(r => (
+          {filteredRemediations.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-state-icon">🧹</div>
+              <h3>No remediations match the filter</h3>
+              <p>Lower the minimum severity or risk score to see more.</p>
+            </div>
+          ) : filteredRemediations.map(r => (
             <div key={r.id} className={`rem-card acc-${r.confidence}`}>
               <div className="rem-header">
                 <div className="rem-summary">{r.summary}</div>

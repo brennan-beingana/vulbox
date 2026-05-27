@@ -133,9 +133,13 @@ class LLMRemediationService:
             logger.info("LLM remediation disabled; using static path", extra={"run_id": run_id})
             return RemediationService.generate_remediations(db, run_id)
 
+        # Highest-risk (critical) entries first: under rate limits or backup
+        # failover, the most severe findings get the real Gemini call before
+        # any budget is exhausted; the long tail degrades to the static rule.
         entries = (
             db.query(SecurityMatrixEntry)
             .filter(SecurityMatrixEntry.run_id == run_id)
+            .order_by(SecurityMatrixEntry.risk_score.desc())
             .all()
         )
 

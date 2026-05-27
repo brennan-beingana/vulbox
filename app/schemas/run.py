@@ -1,6 +1,8 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+_SEVERITY_LEVELS = ("critical", "high", "medium", "low")
 
 
 class RunCreate(BaseModel):
@@ -11,6 +13,16 @@ class RunCreate(BaseModel):
     image_name: str = ""
     image_tag: str = "latest"
     consent_granted: bool = False
+    # Minimum CVE severity to attribute an exploitability (matrix) row to.
+    # The technique still runs; only findings at/above this level get their own
+    # row, which bounds report size. "high" tests Critical+High by default.
+    min_severity: str = "high"
+
+    @field_validator("min_severity", mode="before")
+    @classmethod
+    def _normalize_severity(cls, v: str) -> str:
+        v = (v or "high").strip().lower()
+        return v if v in _SEVERITY_LEVELS else "high"
 
 
 class RunUpdate(BaseModel):
@@ -28,6 +40,7 @@ class RunResponse(BaseModel):
     status: str
     submitted_by: str
     consent_granted: bool
+    min_severity: str = "high"
     started_at: datetime
     completed_at: datetime | None
     created_at: datetime

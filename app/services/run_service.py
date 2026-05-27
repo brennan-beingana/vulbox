@@ -18,6 +18,7 @@ class RunService:
             image_name=payload.image_name,
             image_tag=payload.image_tag,
             consent_granted=payload.consent_granted,
+            min_severity=payload.min_severity,
             submitted_by=submitted_by,
             status="SUBMITTED",
         )

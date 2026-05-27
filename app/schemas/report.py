@@ -44,6 +44,10 @@ class SecurityMatrixEntrySchema(BaseModel):
     mitre_tactic_id: str
     risk_score: int
     cve_id: Optional[str] = None
+    # Severity of the motivating CVE (critical/high/medium/low); None for
+    # proactive/fallback entries with no finding. Drives report ordering + the
+    # frontend severity filter.
+    severity: Optional[str] = None
     epss_score: Optional[float] = None
     # How the motivating CVE resolved to this technique: "cve-map" (direct
     # curated/generated mapping, higher confidence) vs "cwe-bridge" (coarser
@@ -65,6 +69,10 @@ class RemediationResponseSchema(BaseModel):
     source: str
     generated_by: str = "static"
     references: str = ""
+    # Carried from the linked SecurityMatrixEntry so remediation cards can be
+    # sorted/filtered by the same risk/severity as the matrix table.
+    risk_score: Optional[int] = None
+    severity: Optional[str] = None
 
     class Config:
         from_attributes = True

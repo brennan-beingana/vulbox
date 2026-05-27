@@ -200,6 +200,22 @@ def _passes_epss_gate(finding: TrivyFinding, meta: Dict[str, Any]) -> bool:
     return (finding.epss_score or 0.0) >= threshold
 
 
+def _passes_severity_gate(finding: TrivyFinding, min_severity: Optional[str]) -> bool:
+    """Whether a motivating CVE clears the user-selected severity floor.
+
+    ``min_severity`` (from the run's ``min_severity``) caps report size by
+    only attributing per-CVE fan-out rows to findings at/above the chosen
+    level. ``low``/None disables the gate (everything passes). The technique
+    itself still runs regardless — this only governs matrix attribution.
+    """
+    floor = _SEVERITY_RANK.get((min_severity or "low").lower(), 0)
+    # "low"/None/unknown floor → gate off: every finding passes (incl. unknown
+    # severity), matching the slider's "test every finding" promise.
+    if floor <= _SEVERITY_RANK["low"]:
+        return True
+    return _SEVERITY_RANK.get((finding.severity or "unknown").lower(), 0) >= floor
+
+
 def _fallback_matches(rule: Dict[str, Any], findings: List[TrivyFinding]) -> bool:
     """Return True if the rule's match preconditions are satisfied by findings."""
     match = rule.get("match") or {}
@@ -228,6 +244,7 @@ class ARTAdapter:
     def build_queue(
         trivy_findings: List[TrivyFinding],
         tech_profile: Optional[TechProfile] = None,
+        min_severity: Optional[str] = None,
     ) -> List[Tuple[str, List[int]]]:
         """Return ordered list of (technique_id, [motivating_finding_id, ...]).
 
@@ -263,6 +280,7 @@ class ARTAdapter:
                     f.finding_id
                     for f in trivy_findings
                     if tid in ARTAdapter._techniques_for_finding(f)
+                    and _passes_severity_gate(f, min_severity)
                     and _passes_epss_gate(f, _CVE_METADATA.get(f.cve_id, {}))
                 ]
                 queue.append((tid, fids))
@@ -282,6 +300,8 @@ class ARTAdapter:
             if not techniques:
                 continue
             meta = _CVE_METADATA.get(finding.cve_id, {})
+            if not _passes_severity_gate(finding, min_severity):
+                continue
             if not _passes_epss_gate(finding, meta):
                 continue
             # A CVE whose tagged technology matches the detected stack is the

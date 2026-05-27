@@ -12,6 +12,16 @@ function PlusIcon() {
   );
 }
 
+// Slider stops, ordered most-permissive → most-restrictive (left → right).
+const SEVERITY_STOPS = ['low', 'medium', 'high', 'critical'];
+const SEVERITY_LABELS = {
+  low: 'Low — test every finding (largest report)',
+  medium: 'Medium — Critical, High & Medium',
+  high: 'High — Critical & High only',
+  critical: 'Critical — Critical findings only (smallest report)',
+};
+const SEVERITY_COLOR = { low: '#059669', medium: '#d97706', high: '#ea580c', critical: '#dc2626' };
+
 function statusBadgeClass(status) {
   const map = {
     COMPLETE: 'badge-success',
@@ -33,6 +43,7 @@ export default function NewRun() {
     repo_url: '',
     branch: 'main',
     image_tag: 'latest',
+    min_severity: 'high',
     consent_granted: false,
   });
   const [error, setError] = useState('');
@@ -150,6 +161,41 @@ export default function NewRun() {
                   onChange={e => setForm({ ...form, image_tag: e.target.value })}
                 />
               </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="min_severity">
+                Minimum Severity to Test
+                <span
+                  className="badge"
+                  style={{
+                    marginLeft: 8,
+                    color: '#fff',
+                    background: SEVERITY_COLOR[form.min_severity],
+                    textTransform: 'capitalize',
+                  }}
+                >
+                  {form.min_severity}
+                </span>
+              </label>
+              <input
+                id="min_severity"
+                type="range"
+                min="0"
+                max={SEVERITY_STOPS.length - 1}
+                step="1"
+                value={SEVERITY_STOPS.indexOf(form.min_severity)}
+                onChange={e =>
+                  setForm({ ...form, min_severity: SEVERITY_STOPS[Number(e.target.value)] })
+                }
+                style={{ width: '100%', accentColor: SEVERITY_COLOR[form.min_severity] }}
+              />
+              <div className="flex justify-between text-xs text-muted" style={{ marginTop: 2 }}>
+                {SEVERITY_STOPS.map(s => (
+                  <span key={s} style={{ textTransform: 'capitalize' }}>{s}</span>
+                ))}
+              </div>
+              <span className="form-hint">{SEVERITY_LABELS[form.min_severity]}</span>
             </div>
 
             <div className="consent-block mb-4">
