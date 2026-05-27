@@ -10,9 +10,18 @@ class TrivyFindingSchema(BaseModel):
     severity: str
     package_name: str
     fix_available: bool
+    cwe_ids: str = ""
+    epss_score: Optional[float] = None
 
     class Config:
         from_attributes = True
+
+
+class CoverageSchema(BaseModel):
+    """Exploitability-testing coverage: how many detected CVEs got a verdict."""
+
+    detected_cves: int
+    tested_cves: int
 
 
 class DetectedTechnologySchema(BaseModel):
@@ -34,6 +43,12 @@ class SecurityMatrixEntrySchema(BaseModel):
     is_detectable: bool
     mitre_tactic_id: str
     risk_score: int
+    cve_id: Optional[str] = None
+    epss_score: Optional[float] = None
+    # How the motivating CVE resolved to this technique: "cve-map" (direct
+    # curated/generated mapping, higher confidence) vs "cwe-bridge" (coarser
+    # CWE→technique fallback). None for proactive/fallback techniques.
+    match_source: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -87,4 +102,5 @@ class ReportResponse(BaseModel):
     security_matrix: List[SecurityMatrixEntrySchema]
     remediations: List[RemediationResponseSchema]
     executive_summary: Optional[ExecutiveSummarySchema] = None
+    coverage: Optional[CoverageSchema] = None
     created_at: datetime

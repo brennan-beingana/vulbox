@@ -14,6 +14,7 @@ from app.models.security_matrix_entry import SecurityMatrixEntry
 from app.models.trivy_finding import TrivyFinding
 from app.models.art_test_result import ARTTestResult
 from app.schemas.report import (
+    CoverageSchema,
     DetectedTechnologySchema,
     ExecutiveSummarySchema,
     RemediationResponseSchema,
@@ -21,6 +22,34 @@ from app.schemas.report import (
     SecurityMatrixEntrySchema,
 )
 from app.services.run_service import RunService
+
+
+def _matrix_schema(entry: SecurityMatrixEntry, findings_by_id: dict) -> SecurityMatrixEntrySchema:
+    """Enrich a matrix entry with its motivating CVE id, EPSS score, provenance."""
+    from app.adapters.art_adapter import _CVE_TECHNIQUE_MAP
+
+    schema = SecurityMatrixEntrySchema.model_validate(entry)
+    finding = findings_by_id.get(entry.finding_id)
+    if finding is not None:
+        schema.cve_id = finding.cve_id
+        schema.epss_score = finding.epss_score
+        # Direct CVE→technique mapping vs. the coarser CWE-bridge fallback.
+        schema.match_source = (
+            "cve-map" if finding.cve_id in _CVE_TECHNIQUE_MAP else "cwe-bridge"
+        )
+    return schema
+
+
+def _coverage(findings: list, matrix: list) -> CoverageSchema:
+    """Distinct detected CVEs vs. distinct CVEs that got an exploitability row."""
+    detected = {f.cve_id for f in findings}
+    by_id = {f.finding_id: f for f in findings}
+    tested = {
+        by_id[e.finding_id].cve_id
+        for e in matrix
+        if e.finding_id is not None and e.finding_id in by_id
+    }
+    return CoverageSchema(detected_cves=len(detected), tested_cves=len(tested))
 
 
 def _load_executive_summary(db: Session, run_id: int) -> ExecutiveSummarySchema | None:
@@ -52,12 +81,12 @@ def get_report(run_id: int, db: Session = Depends(get_db)):
         .filter(SecurityMatrixEntry.run_id == run_id)
         .all()
     )
+    findings = db.query(TrivyFinding).filter(TrivyFinding.run_id == run_id).all()
+    findings_by_id = {f.finding_id: f for f in findings}
     remediations = (
         db.query(Remediation).filter(Remediation.run_id == run_id).all()
     )
-    trivy_count = (
-        db.query(TrivyFinding).filter(TrivyFinding.run_id == run_id).count()
-    )
+    trivy_count = len(findings)
     art_count = (
         db.query(ARTTestResult).filter(ARTTestResult.run_id == run_id).count()
     )
@@ -77,9 +106,10 @@ def get_report(run_id: int, db: Session = Depends(get_db)):
         art_tests_count=art_count,
         remediations_count=len(remediations),
         detected_technologies=[DetectedTechnologySchema.model_validate(t) for t in technologies],
-        security_matrix=[SecurityMatrixEntrySchema.model_validate(e) for e in matrix],
+        security_matrix=[_matrix_schema(e, findings_by_id) for e in matrix],
         remediations=[RemediationResponseSchema.model_validate(r) for r in remediations],
         executive_summary=_load_executive_summary(db, run_id),
+        coverage=_coverage(findings, matrix),
         created_at=run.created_at,
     )
 
@@ -96,6 +126,8 @@ def export_report(
         .filter(SecurityMatrixEntry.run_id == run_id)
         .all()
     )
+    findings = db.query(TrivyFinding).filter(TrivyFinding.run_id == run_id).all()
+    findings_by_id = {f.finding_id: f for f in findings}
 
     if format == "json":
         # Reuse the standard report endpoint
@@ -107,12 +139,16 @@ def export_report(
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow(
-            ["entry_id", "mitre_tactic_id", "is_present", "is_exploitable",
-             "is_detectable", "risk_score", "finding_id", "test_result_id"]
+            ["entry_id", "mitre_tactic_id", "cve_id", "epss_score", "is_present",
+             "is_exploitable", "is_detectable", "risk_score", "finding_id",
+             "test_result_id"]
         )
         for e in matrix:
+            f = findings_by_id.get(e.finding_id)
             writer.writerow([
-                e.entry_id, e.mitre_tactic_id, e.is_present, e.is_exploitable,
+                e.entry_id, e.mitre_tactic_id,
+                f.cve_id if f else "", f.epss_score if f else "",
+                e.is_present, e.is_exploitable,
                 e.is_detectable, e.risk_score, e.finding_id, e.test_result_id,
             ])
         buf.seek(0)
@@ -133,7 +169,10 @@ def export_report(
             .order_by(DetectedTechnology.confidence.desc())
             .all()
         )
-        html = _render_pdf_html(run, matrix, remediations, summary, technologies)
+        coverage = _coverage(findings, matrix)
+        html = _render_pdf_html(
+            run, matrix, remediations, summary, technologies, findings_by_id, coverage
+        )
         try:
             import weasyprint
             pdf_bytes = weasyprint.HTML(string=html).write_pdf()
@@ -180,8 +219,13 @@ def _risk_color(score: int) -> str:
     return "#059669"
 
 
-def _render_pdf_html(run, matrix, remediations=None, summary=None, technologies=None) -> str:
+def _render_pdf_html(
+    run, matrix, remediations=None, summary=None, technologies=None,
+    findings_by_id=None, coverage=None,
+) -> str:
     from html import escape as esc
+
+    findings_by_id = findings_by_id or {}
 
     def _badge(text: str, bg: str, fg: str) -> str:
         return (
@@ -265,18 +309,42 @@ def _render_pdf_html(run, matrix, remediations=None, summary=None, technologies=
         c = color_yes if val else color_no
         return f"<span style='font-weight:700;color:{c};'>{'Yes' if val else 'No'}</span>"
 
-    rows = "".join(
-        "<tr>"
-        f"<td><span style='font-family:{_PDF_MONO};font-size:10px;background:#f0f2f8;"
-        f"border:1px solid #e4e8f0;border-radius:5px;padding:2px 6px;'>{esc(e.mitre_tactic_id or '—')}</span></td>"
-        f"<td>{_yn(e.is_present, '#111827', '#9ca3af')}</td>"
-        f"<td>{_yn(e.is_exploitable)}</td>"
-        f"<td>{_yn(e.is_detectable, '#059669', '#dc2626')}</td>"
-        f"<td><span style='display:inline-block;background:{_risk_color(e.risk_score)};color:#fff;"
-        f"font-size:10px;font-weight:800;padding:2px 8px;border-radius:9999px;'>{e.risk_score}/75</span></td>"
-        "</tr>"
-        for e in matrix
-    )
+    def _epss_cell(score) -> str:
+        if score is None:
+            return "<span style='color:#9ca3af;'>—</span>"
+        # EPSS is a 0–1 probability; show as a percentage, bold when elevated.
+        weight = "700" if score >= 0.10 else "400"
+        color = "#dc2626" if score >= 0.50 else "#111827"
+        return f"<span style='font-weight:{weight};color:{color};'>{score * 100:.1f}%</span>"
+
+    rows = ""
+    for e in matrix:
+        f = findings_by_id.get(e.finding_id)
+        cve = f.cve_id if f else None
+        epss = f.epss_score if f else None
+        rows += (
+            "<tr>"
+            f"<td><span style='font-family:{_PDF_MONO};font-size:10px;background:#f0f2f8;"
+            f"border:1px solid #e4e8f0;border-radius:5px;padding:2px 6px;'>{esc(e.mitre_tactic_id or '—')}</span></td>"
+            f"<td><span style='font-family:{_PDF_MONO};font-size:9.5px;color:#4b5563;'>{esc(cve or '—')}</span></td>"
+            f"<td>{_epss_cell(epss)}</td>"
+            f"<td>{_yn(e.is_present, '#111827', '#9ca3af')}</td>"
+            f"<td>{_yn(e.is_exploitable)}</td>"
+            f"<td>{_yn(e.is_detectable, '#059669', '#dc2626')}</td>"
+            f"<td><span style='display:inline-block;background:{_risk_color(e.risk_score)};color:#fff;"
+            f"font-size:10px;font-weight:800;padding:2px 8px;border-radius:9999px;'>{e.risk_score}/75</span></td>"
+            "</tr>"
+        )
+
+    # Coverage caption — directly answers "how many detected CVEs got an
+    # exploitability verdict".
+    coverage_html = ""
+    if coverage is not None:
+        coverage_html = (
+            "<div style='font-size:10px;color:#6b7280;margin:0 0 8px;'>"
+            f"Exploitability tested for <b style='color:#111827;'>{coverage.tested_cves}</b> "
+            f"of <b style='color:#111827;'>{coverage.detected_cves}</b> detected CVEs.</div>"
+        )
 
     # ---- remediation cards ----
     rem_html = ""
@@ -356,7 +424,8 @@ def _render_pdf_html(run, matrix, remediations=None, summary=None, technologies=
     {tech_html}
     {summary_html}
     <div class="section-label">Security Matrix</div>
-    <table class="matrix"><tr><th>MITRE Tactic</th><th>Present</th><th>Exploitable</th>
-    <th>Detectable</th><th>Risk Score</th></tr>{rows}</table>
+    {coverage_html}
+    <table class="matrix"><tr><th>MITRE Tactic</th><th>CVE</th><th>EPSS</th><th>Present</th>
+    <th>Exploitable</th><th>Detectable</th><th>Risk Score</th></tr>{rows}</table>
     {rem_html}
     </body></html>"""

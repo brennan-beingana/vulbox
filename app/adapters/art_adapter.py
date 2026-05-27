@@ -19,8 +19,48 @@ logger = get_logger(__name__)
 _DEV_FIXTURE = settings.project_root / "data" / "sample_outputs" / "atomic-fixture.json"
 _CURATED_MAP_PATH = settings.project_root / "data" / "cve_technique_map.yml"
 _GENERATED_MAP_PATH = settings.project_root / "data" / "cve_technique_map.generated.yml"
+_CWE_BRIDGE_PATH = settings.project_root / "data" / "cwe_technique_map.yml"
 
 _SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "unknown": 0}
+
+
+def _load_cwe_bridge(path: Path) -> Dict[str, List[str]]:
+    """Load the CWE→technique bridge into ``{CWE-XX: [technique, ...]}``.
+
+    This is the scan-time fallback consulted by ``build_queue`` when a finding's
+    CVE isn't in the CVE→technique map: bridging the finding's CweIDs keeps the
+    CVE in play (provenance ``cwe-bridge``) instead of dropping it. A CWE may map
+    to several techniques (distinct rows), so values are ordered lists.
+    """
+    if not path.is_file():
+        logger.warning("CWE bridge missing", extra={"path": str(path)})
+        return {}
+    try:
+        data = yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as exc:
+        logger.warning("Invalid CWE bridge", extra={"path": str(path), "err": str(exc)})
+        return {}
+    bridge: Dict[str, List[str]] = {}
+    for entry in data.get("mappings", []) or []:
+        cwe = (entry.get("cwe") or "").strip()
+        tech = (entry.get("technique") or "").strip()
+        if cwe and tech and tech not in bridge.setdefault(cwe, []):
+            bridge[cwe].append(tech)
+    logger.info("CWE bridge loaded", extra={"cwes": len(bridge)})
+    return bridge
+
+
+def _bridge_techniques(cwe_ids: str) -> List[str]:
+    """Map a comma-joined CweIDs string to deduped bridge techniques (order-preserving)."""
+    out: List[str] = []
+    for cwe in (cwe_ids or "").split(","):
+        cwe = cwe.strip()
+        if not cwe:
+            continue
+        for tech in _CWE_TECHNIQUE_MAP.get(cwe, []):
+            if tech not in out:
+                out.append(tech)
+    return out
 
 
 def _ingest_mappings(
@@ -141,6 +181,23 @@ def _load_technique_map() -> Tuple[
 
 
 _CVE_TECHNIQUE_MAP, _CVE_METADATA, _FALLBACK_RULES = _load_technique_map()
+_CWE_TECHNIQUE_MAP: Dict[str, List[str]] = _load_cwe_bridge(_CWE_BRIDGE_PATH)
+
+
+def _passes_epss_gate(finding: TrivyFinding, meta: Dict[str, Any]) -> bool:
+    """Whether a motivating CVE earns its own fan-out matrix row.
+
+    With ``VULBOX_EPSS_MIN`` at its default 0.0 the gate is off and every
+    motivating CVE passes. When raised, only CVEs whose EPSS score meets the
+    threshold are attributed per-CVE — except KEV/ransomware-flagged CVEs,
+    which are always included regardless of score.
+    """
+    threshold = settings.epss_min
+    if threshold <= 0.0:
+        return True
+    if meta.get("kev") or meta.get("ransomware"):
+        return True
+    return (finding.epss_score or 0.0) >= threshold
 
 
 def _fallback_matches(rule: Dict[str, Any], findings: List[TrivyFinding]) -> bool:
@@ -171,83 +228,94 @@ class ARTAdapter:
     def build_queue(
         trivy_findings: List[TrivyFinding],
         tech_profile: Optional[TechProfile] = None,
-    ) -> List[Tuple[str, Optional[int]]]:
-        """Return ordered list of (technique_id, motivating_finding_id|None).
+    ) -> List[Tuple[str, List[int]]]:
+        """Return ordered list of (technique_id, [motivating_finding_id, ...]).
+
+        Each technique runs once; the list of finding_ids is every Trivy
+        finding that motivated it (fan-out), so the orchestrator can attribute
+        one exploitability row per CVE sharing the test. Proactive/fallback
+        techniques carry an empty list (no motivating CVE).
 
         Priority, highest first:
-          1. CVE-driven matches — a Trivy-confirmed CVE maps to a technique.
-             These carry the motivating finding_id (ransomware/KEV ranked up).
+          1. CVE-driven matches — a technique resolved from a Trivy-confirmed
+             CVE, either via the CVE→technique map or, when that misses, by
+             bridging the finding's CweIDs. Ranked by stack-relevance,
+             ransomware, KEV, then EPSS (higher first).
           2. Stack-aware proactive bucket — techniques relevant to the detected
-             tech stack (tech_profile), queued even with no CVE flagging them.
-             Confirmed-present (bucket 1) beats inferred-from-stack.
-          3. Heuristic keyword fallbacks — fired by the findings' severity
-             profile + package keywords.
+             stack, queued even with no CVE. Confirmed-present beats inferred.
+          3. Heuristic keyword fallbacks — fired by severity/keyword signal.
 
-        Deduped by technique across all buckets, so each technique runs once.
-        tech_profile is None/empty → queue degrades to the prior CVE+fallback
-        behavior. (Bucket 2 is skipped in dev mode, which replays a fixture.)
+        tech_profile None/empty → queue degrades to CVE+fallback behavior.
+        (Bucket 2 is skipped in dev mode, which replays a fixture.)
         """
         if settings.dev_mode:
             raw = json.loads(_DEV_FIXTURE.read_text())
             seen: set = set()
-            queue: List[Tuple[str, Optional[int]]] = []
-            cve_to_finding = {f.cve_id: f.finding_id for f in trivy_findings}
+            queue: List[Tuple[str, List[int]]] = []
             for t in raw.get("tests", []):
                 tid = t["technique_id"]
                 if tid in seen:
                     continue
                 seen.add(tid)
-                motivating_fid: Optional[int] = None
-                technique_for_cve = _CVE_TECHNIQUE_MAP
-                for cve, technique in technique_for_cve.items():
-                    if technique == tid and cve in cve_to_finding:
-                        motivating_fid = cve_to_finding[cve]
-                        break
-                queue.append((tid, motivating_fid))
+                # Fan-out: every finding whose CVE (or CWE bridge) resolves to
+                # this technique and clears the EPSS gate motivates the test.
+                fids = [
+                    f.finding_id
+                    for f in trivy_findings
+                    if tid in ARTAdapter._techniques_for_finding(f)
+                    and _passes_epss_gate(f, _CVE_METADATA.get(f.cve_id, {}))
+                ]
+                queue.append((tid, fids))
             return queue
 
-        priority: List[Tuple[str, Optional[int]]] = []
+        priority: List[Tuple[str, List[int]]] = []
         seen_techniques: set = set()
 
-        # Collect CVE-driven matches with priority signals, then emit in order:
-        # ransomware-linked first, then KEV-listed, then everything else.
-        # Stable sort within each bucket preserves the order findings arrived.
+        # Collect CVE-driven matches with priority signals. A finding may yield
+        # several techniques (CWE bridge); each (technique, finding) pair is
+        # ranked independently, then grouped so each technique runs once with
+        # all its motivating findings. Lower rank tuple = higher priority.
         profile_tags = tech_profile.tags() if tech_profile else set()
-        cve_driven: List[Tuple[tuple, str, Optional[int]]] = []
+        records: List[Tuple[tuple, str, int]] = []
         for idx, finding in enumerate(trivy_findings):
-            technique = _CVE_TECHNIQUE_MAP.get(finding.cve_id)
-            if not technique:
+            techniques = ARTAdapter._techniques_for_finding(finding)
+            if not techniques:
                 continue
             meta = _CVE_METADATA.get(finding.cve_id, {})
+            if not _passes_epss_gate(finding, meta):
+                continue
             # A CVE whose tagged technology matches the detected stack is the
-            # strongest signal — confirmed-present *and* stack-relevant — so it
-            # leads the queue, ahead of even ransomware/KEV-flagged CVEs.
+            # strongest signal — confirmed-present *and* stack-relevant.
             stack_relevant = bool(profile_tags & set(meta.get("technology") or []))
-            # Lower tuple = higher priority.
             rank = (
                 0 if stack_relevant else 1,
                 0 if meta.get("ransomware") else 1,
                 0 if meta.get("kev") else 1,
+                -(finding.epss_score or 0.0),  # higher EPSS = tested sooner
                 idx,
             )
-            cve_driven.append((rank, technique, finding.finding_id))
+            for technique in techniques:
+                records.append((rank, technique, finding.finding_id))
 
-        cve_driven.sort(key=lambda x: x[0])
-        for _, technique, fid in cve_driven:
-            if technique in seen_techniques:
-                continue
-            priority.append((technique, fid))
+        records.sort(key=lambda x: x[0])
+        # Group by technique, preserving the position of its best-ranked finding
+        # and collecting every motivating finding_id (deduped, rank-ordered).
+        grouped: Dict[str, List[int]] = {}
+        for _, technique, fid in records:
+            bucket = grouped.setdefault(technique, [])
+            if fid not in bucket:
+                bucket.append(fid)
+        for technique, fids in grouped.items():
+            priority.append((technique, fids))
             seen_techniques.add(technique)
 
         # Stack-aware proactive bucket — techniques relevant to the detected
-        # tech stack, even when no CVE flagged them. Sits below CVE-driven
-        # matches (confirmed-present beats inferred) and above generic
-        # keyword fallbacks. No motivating finding, hence None.
+        # stack, even when no CVE flagged them. No motivating finding.
         if tech_profile is not None and not tech_profile.is_empty():
             for technique in techniques_for(tech_profile.tags()):
                 if technique in seen_techniques:
                     continue
-                priority.append((technique, None))
+                priority.append((technique, []))
                 seen_techniques.add(technique)
 
         # Heuristic fallbacks — fired by signal, not a fixed list.
@@ -256,10 +324,24 @@ class ARTAdapter:
             if tech in seen_techniques:
                 continue
             if _fallback_matches(rule, trivy_findings):
-                priority.append((tech, None))
+                priority.append((tech, []))
                 seen_techniques.add(tech)
 
         return priority
+
+    @staticmethod
+    def _techniques_for_finding(finding: TrivyFinding) -> List[str]:
+        """Resolve a finding to ART techniques.
+
+        The CVE→technique map is authoritative; on a miss, fall back to bridging
+        the finding's CweIDs. Returns [] when neither resolves (the finding is
+        dropped from the CVE-driven bucket but may still be covered by the
+        proactive/fallback buckets).
+        """
+        technique = _CVE_TECHNIQUE_MAP.get(finding.cve_id)
+        if technique:
+            return [technique]
+        return _bridge_techniques(finding.cwe_ids)
 
     @staticmethod
     def execute_test(

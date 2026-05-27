@@ -1,11 +1,15 @@
 # CWE → MITRE ATT&CK technique bridge.
 #
-# Used by scripts/build_cve_map.py to map CISA KEV CVEs that aren't in the
-# attack_to_cve curated set. Each KEV entry carries one or more CWEs; the
-# bridge produces one (CVE → technique) row per CWE hit.
+# Two consumers:
+#   1. scripts/build_cve_map.py — maps CISA KEV CVEs not in the attack_to_cve
+#      curated set (one (CVE → technique) row per CWE hit).
+#   2. app.adapters.art_adapter — the scan-time fallback. When a Trivy finding's
+#      CVE isn't in the CVE→technique map, the adapter bridges the finding's
+#      own CweIDs through this table so the CVE still yields a technique to
+#      test (provenance "cwe-bridge"), instead of being dropped from the queue.
 #
-# Coverage target: the top 40 CWEs in KEV cover ~80% of the catalog. Adding
-# more is cheap — append entries and re-run the builder.
+# Coverage target: the top ~60–80 CWEs in KEV cover the long tail. Adding more
+# is cheap — append entries and re-run the builder.
 #
 # Calls are conservative: ambiguous CWEs (e.g. CWE-20 "improper input
 # validation") map to the most-likely *exploitation* technique (T1190), not
@@ -109,7 +113,101 @@ mappings:
   # --- Concurrency / DoS --------------------------------------------------
   - cwe: CWE-362     # Race Condition (often leads to privesc)
     technique: T1068
+  - cwe: CWE-367     # TOCTOU race condition
+    technique: T1068
   - cwe: CWE-399     # Resource Management Errors (deprecated; mostly DoS)
     technique: T1499
   - cwe: CWE-404     # Improper Resource Shutdown
     technique: T1499
+  - cwe: CWE-400     # Uncontrolled Resource Consumption
+    technique: T1499
+  - cwe: CWE-770     # Allocation Without Limits / Throttling
+    technique: T1499
+  - cwe: CWE-674     # Uncontrolled Recursion (stack exhaustion DoS)
+    technique: T1499
+  - cwe: CWE-835     # Infinite Loop
+    technique: T1499
+
+  # --- Injection / RCE family (extended) ----------------------------------
+  - cwe: CWE-91      # XML Injection
+    technique: T1190
+  - cwe: CWE-917     # Expression Language Injection (OGNL/SpEL)
+    technique: T1059
+  - cwe: CWE-1336    # Server-Side Template Injection
+    technique: T1059
+  - cwe: CWE-470     # Unsafe Reflection
+    technique: T1059
+  - cwe: CWE-184     # Incomplete Denylist (filter bypass → injection)
+    technique: T1190
+
+  # --- Memory-safety (extended) -------------------------------------------
+  - cwe: CWE-126     # Buffer Over-read
+    technique: T1212
+  - cwe: CWE-129     # Improper Validation of Array Index
+    technique: T1203
+  - cwe: CWE-131     # Incorrect Buffer Size Calculation
+    technique: T1203
+  - cwe: CWE-191     # Integer Underflow
+    technique: T1203
+  - cwe: CWE-415     # Double Free
+    technique: T1203
+  - cwe: CWE-476     # NULL Pointer Dereference (mostly DoS, sometimes exec)
+    technique: T1499
+  - cwe: CWE-824     # Access of Uninitialized Pointer
+    technique: T1203
+
+  # --- Authentication / session (extended) --------------------------------
+  - cwe: CWE-294     # Authentication Bypass by Capture-Replay
+    technique: T1078
+  - cwe: CWE-295     # Improper Certificate Validation
+    technique: T1557
+  - cwe: CWE-384     # Session Fixation
+    technique: T1078
+  - cwe: CWE-613     # Insufficient Session Expiration
+    technique: T1078
+  - cwe: CWE-307     # Improper Restriction of Excessive Auth Attempts (brute force)
+    technique: T1110
+  - cwe: CWE-640     # Weak Password Recovery
+    technique: T1078
+
+  # --- Credentials / secrets (extended) -----------------------------------
+  - cwe: CWE-256     # Plaintext Storage of Password
+    technique: T1552
+  - cwe: CWE-259     # Use of Hard-coded Password
+    technique: T1552.001
+  - cwe: CWE-321     # Use of Hard-coded Cryptographic Key
+    technique: T1552.001
+  - cwe: CWE-312     # Cleartext Storage of Sensitive Information
+    technique: T1552
+  - cwe: CWE-319     # Cleartext Transmission of Sensitive Information
+    technique: T1040
+
+  # --- Path / disclosure (extended) ---------------------------------------
+  - cwe: CWE-98      # PHP Remote/Local File Inclusion
+    technique: T1190
+  - cwe: CWE-552     # Files Accessible to External Parties
+    technique: T1083
+  - cwe: CWE-732     # Incorrect Permission Assignment for Critical Resource
+    technique: T1222
+
+  # --- Redirect / request manipulation ------------------------------------
+  - cwe: CWE-601     # Open Redirect
+    technique: T1190
+  - cwe: CWE-444     # HTTP Request Smuggling
+    technique: T1190
+
+  # --- Privilege / access control (extended) ------------------------------
+  - cwe: CWE-250     # Execution with Unnecessary Privileges
+    technique: T1068
+  - cwe: CWE-276     # Incorrect Default Permissions
+    technique: T1222
+  - cwe: CWE-668     # Exposure of Resource to Wrong Sphere
+    technique: T1083
+  - cwe: CWE-913     # Improper Control of Dynamically-Managed Code Resources
+    technique: T1059
+
+  # --- Crypto -------------------------------------------------------------
+  - cwe: CWE-327     # Use of Broken/Risky Cryptographic Algorithm
+    technique: T1557
+  - cwe: CWE-330     # Use of Insufficiently Random Values
+    technique: T1078

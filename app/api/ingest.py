@@ -14,6 +14,7 @@ from app.models.trivy_finding import TrivyFinding
 from app.schemas.atomic import AtomicIngestionPayload, AtomicResponse
 from app.schemas.falco import FalcoIngestionPayload, FalcoResponse
 from app.schemas.trivy import TrivyIngestionPayload, TrivyResponse
+from app.services import epss
 from app.services.run_service import RunService
 
 router = APIRouter(prefix="/runs/{run_id}/ingest", tags=["ingestion (dev)"])
@@ -37,6 +38,8 @@ def ingest_trivy(run_id: int, payload: TrivyIngestionPayload, db: Session = Depe
                 package_name=vuln.PkgName,
                 description=vuln.Description[:2000],
                 fix_available=bool(vuln.FixedVersion),
+                cwe_ids=",".join(vuln.CweIDs or []),
+                epss_score=epss.score_for(vuln.VulnerabilityID),
             )
             db.add(f)
             findings.append(f)

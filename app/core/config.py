@@ -36,5 +36,12 @@ class Settings(BaseModel):
         os.getenv("VULBOX_LLM_EXEC_SUMMARY", "true").lower() == "true"
     )
 
+    # EPSS gate for fan-out matrix entries. 0.0 = off (every motivating CVE
+    # that maps to a tested technique gets a matrix row). When raised, only
+    # CVEs whose EPSS score meets the threshold are attributed per-CVE
+    # (KEV/ransomware-flagged CVEs are always included), keeping large scans
+    # bounded while the technique itself still runs once.
+    epss_min: float = float(os.getenv("VULBOX_EPSS_MIN", "0.0"))
+
 
 settings = Settings()

@@ -12,9 +12,16 @@ def _force_prod_mode(monkeypatch):
     monkeypatch.setattr(settings, "dev_mode", False)
 
 
-def _f(cve, severity="medium", pkg="", desc=""):
+def _f(cve, severity="medium", pkg="", desc="", cwe_ids="", epss_score=None, finding_id=None):
     return TrivyFinding(
-        run_id=1, cve_id=cve, severity=severity, package_name=pkg, description=desc
+        run_id=1,
+        cve_id=cve,
+        severity=severity,
+        package_name=pkg,
+        description=desc,
+        cwe_ids=cwe_ids,
+        epss_score=epss_score,
+        finding_id=finding_id,
     )
 
 
@@ -194,3 +201,98 @@ def test_stack_relevance_ignored_without_profile(monkeypatch):
     findings = [_f("CVE-RANSOM"), _f("CVE-STACK")]
     techs = [t for t, _ in ART.ARTAdapter.build_queue(findings)]
     assert techs.index("T1486") < techs.index("T1190")
+
+
+# --- Scan-time CWE bridging (E2) ---
+
+def test_cwe_bridge_loaded():
+    assert len(ART._CWE_TECHNIQUE_MAP) >= 60  # expanded to ~80 CWEs
+    assert "T1059.004" in ART._CWE_TECHNIQUE_MAP.get("CWE-78", [])
+    assert "T1203" in ART._CWE_TECHNIQUE_MAP.get("CWE-787", [])
+
+
+def test_unmapped_cve_with_cwe_yields_technique():
+    # CVE not in the CVE→technique map, but its CWE bridges to a technique.
+    # Before the bridge this finding would be dropped from the CVE-driven bucket.
+    f = _f("CVE-9999-0001", cwe_ids="CWE-78", finding_id=7)
+    assert ART._CVE_TECHNIQUE_MAP.get("CVE-9999-0001") is None
+    queue = dict(ART.ARTAdapter.build_queue([f]))
+    assert queue.get("T1059.004") == [7]
+
+
+def test_cve_map_wins_over_cwe_bridge(monkeypatch):
+    # When a CVE is in the map, the map technique is used and the CWE ignored.
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-MAPPED", "T1068")
+    f = _f("CVE-MAPPED", cwe_ids="CWE-78", finding_id=3)  # CWE-78 → T1059.004
+    techs = [t for t, _ in ART.ARTAdapter.build_queue([f])]
+    assert "T1068" in techs
+    assert "T1059.004" not in techs
+
+
+# --- Fan-out attribution (E3) ---
+
+def test_fanout_groups_findings_under_one_technique(monkeypatch):
+    # Two distinct CVEs mapping to the same technique → ONE queue entry that
+    # carries BOTH motivating finding_ids.
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-A", "T1190")
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-B", "T1190")
+    findings = [_f("CVE-A", finding_id=1), _f("CVE-B", finding_id=2)]
+    queue = dict(ART.ARTAdapter.build_queue(findings))
+    assert sorted(queue["T1190"]) == [1, 2]
+
+
+def test_proactive_and_fallback_carry_empty_finding_list():
+    findings = [_f("CVE-2099-0003", severity="low", pkg="rare-pkg", desc="x")]
+    queue = ART.ARTAdapter.build_queue(findings)
+    # The always-on T1082 fallback fires with no motivating CVE → empty list.
+    assert ("T1082", []) in queue
+
+
+# --- EPSS ranking + gate (E4) ---
+
+def test_epss_orders_within_same_priority(monkeypatch):
+    # Two plain (non-KEV) CVEs, distinct techniques, differing EPSS. The higher
+    # EPSS one is tested first.
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-LOWP", "T1003")
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-HIGHP", "T1190")
+    findings = [
+        _f("CVE-LOWP", epss_score=0.01, finding_id=1),
+        _f("CVE-HIGHP", epss_score=0.90, finding_id=2),
+    ]
+    techs = [t for t, _ in ART.ARTAdapter.build_queue(findings)]
+    assert techs.index("T1190") < techs.index("T1003")
+
+
+def test_epss_gate_excludes_low_score(monkeypatch):
+    monkeypatch.setattr(settings, "epss_min", 0.5)
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-LOW", "T1190")
+    f = _f("CVE-LOW", epss_score=0.01, finding_id=9)
+    queue = dict(ART.ARTAdapter.build_queue([f]))
+    # Below the gate and not KEV/ransomware → no CVE-driven row for it.
+    assert "T1190" not in queue
+
+
+def test_epss_gate_includes_high_score(monkeypatch):
+    monkeypatch.setattr(settings, "epss_min", 0.5)
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-HIGH", "T1190")
+    f = _f("CVE-HIGH", epss_score=0.80, finding_id=9)
+    queue = dict(ART.ARTAdapter.build_queue([f]))
+    assert queue.get("T1190") == [9]
+
+
+def test_epss_gate_keeps_kev_regardless(monkeypatch):
+    monkeypatch.setattr(settings, "epss_min", 0.9)
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-KEVLOW", "T1190")
+    monkeypatch.setitem(ART._CVE_METADATA, "CVE-KEVLOW", {"kev": True})
+    f = _f("CVE-KEVLOW", epss_score=0.01, finding_id=4)  # below gate, but KEV
+    queue = dict(ART.ARTAdapter.build_queue([f]))
+    assert queue.get("T1190") == [4]
+
+
+def test_gate_off_by_default_includes_unscored(monkeypatch):
+    # Default epss_min=0.0 → gate off, even an unscored (None) CVE is attributed.
+    monkeypatch.setattr(settings, "epss_min", 0.0)
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-NOSCORE", "T1190")
+    f = _f("CVE-NOSCORE", epss_score=None, finding_id=5)
+    queue = dict(ART.ARTAdapter.build_queue([f]))
+    assert queue.get("T1190") == [5]

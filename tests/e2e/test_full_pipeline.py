@@ -58,6 +58,22 @@ def test_full_pipeline_against_vulnerable_target(api_client, target_path):
     assert len(report["security_matrix"]) > 0, "security matrix is empty"
     assert report["remediations_count"] > 0, "no remediations generated"
 
+    # Coverage lift (CWE-bridge + fan-out): exploitability should be attributed
+    # to more than one distinct detected CVE, not just a single motivating one.
+    # node:14-alpine's distro CVE spread reliably maps several CVEs to tested
+    # techniques once CWE bridging is in play.
+    matrix_cves = {
+        e["cve_id"] for e in report["security_matrix"] if e.get("cve_id")
+    }
+    assert len(matrix_cves) >= 2, (
+        "expected exploitability rows for multiple distinct CVEs (fan-out + "
+        f"CWE-bridge coverage lift), got {sorted(matrix_cves)}"
+    )
+    coverage = report.get("coverage") or {}
+    assert coverage.get("tested_cves", 0) >= 2, (
+        f"expected >=2 CVEs to receive an exploitability verdict, got {coverage}"
+    )
+
     # Soft: if no test exploited, ART wiring is suspect — warn instead of fail
     # so a partial pipeline regression doesn't block the whole demo prep.
     if not any(e.get("is_exploitable") for e in report["security_matrix"]):

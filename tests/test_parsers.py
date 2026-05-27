@@ -26,6 +26,27 @@ def test_trivy_adapter_is_not_blocking():
     assert TrivyAdapter.is_blocking() is False
 
 
+def test_trivy_adapter_captures_cwe_and_epss():
+    from app.adapters.trivy_adapter import TrivyAdapter
+
+    findings = {f.cve_id: f for f in TrivyAdapter.scan("x", run_id=1)}
+    # CweIDs is read straight off the Trivy vuln entry, comma-joined.
+    assert findings["CVE-2024-1234"].cwe_ids == "CWE-787"
+    # EPSS enrichment runs against the vendored snapshot. CVE-2024-1234 is a
+    # real, scored CVE — its score must be a float in [0, 1].
+    score = findings["CVE-2024-1234"].epss_score
+    assert score is not None and 0.0 <= score <= 1.0
+
+
+def test_trivy_parse_handles_missing_cwe():
+    """A vuln with no CweIDs key yields an empty cwe_ids string, not a crash."""
+    from app.adapters.trivy_adapter import TrivyAdapter
+
+    raw = {"Results": [{"Vulnerabilities": [{"VulnerabilityID": "CVE-0000-0001", "Severity": "LOW"}]}]}
+    findings = TrivyAdapter._parse(raw, run_id=1)
+    assert findings[0].cwe_ids == ""
+
+
 def test_falco_adapter_collects_alerts():
     from app.adapters.falco_adapter import FalcoAdapter
 
@@ -45,12 +66,14 @@ def test_art_adapter_builds_queue():
     findings = [TrivyFinding(run_id=1, cve_id="CVE-2021-4034", severity="critical", package_name="pkexec")]
     queue = ARTAdapter.build_queue(findings)
     assert len(queue) > 0
-    # New contract: list of (technique_id, motivating_finding_id|None) tuples.
+    # Fan-out contract: list of (technique_id, [motivating_finding_id, ...]).
+    # The list is empty for proactive/fallback techniques (no motivating CVE).
     assert all(
         isinstance(item, tuple)
         and len(item) == 2
         and isinstance(item[0], str)
-        and (item[1] is None or isinstance(item[1], int))
+        and isinstance(item[1], list)
+        and all(isinstance(fid, int) for fid in item[1])
         for item in queue
     )
 

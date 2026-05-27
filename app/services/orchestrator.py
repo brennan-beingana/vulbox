@@ -258,13 +258,13 @@ async def _phase_test_loop(
     sandbox_cfg: Dict[str, Any],
     tech_profile: Optional[TechProfile] = None,
 ) -> None:
-    queue: List[Tuple[str, Optional[int]]] = await asyncio.to_thread(
+    queue: List[Tuple[str, List[int]]] = await asyncio.to_thread(
         ARTAdapter.build_queue, trivy_findings, tech_profile
     )
     findings_by_id: Dict[int, TrivyFinding] = {f.finding_id: f for f in trivy_findings}
     rebuilds = 0
 
-    for test_id, motivating_finding_id in queue:
+    for test_id, motivating_finding_ids in queue:
         _push_event(run.id, {"event": "test_start", "test_id": test_id})
 
         test_result: ARTTestResult = await asyncio.to_thread(
@@ -306,24 +306,30 @@ async def _phase_test_loop(
             db.add(alert)
         db.commit()
 
-        severity = (
-            findings_by_id[motivating_finding_id].severity
-            if motivating_finding_id in findings_by_id
-            else None
-        )
-        score = _compute_risk(test_result.exploited, len(alerts) > 0, severity)
-
-        entry = SecurityMatrixEntry(
-            run_id=run.id,
-            finding_id=motivating_finding_id,
-            test_result_id=test_result.test_result_id,
-            is_present=True,
-            is_exploitable=test_result.exploited,
-            is_detectable=len(alerts) > 0,
-            mitre_tactic_id=test_id,
-            risk_score=score,
-        )
-        db.add(entry)
+        detected = len(alerts) > 0
+        # Fan-out: one SecurityMatrixEntry per motivating CVE, all sharing this
+        # test_result_id, so every detected CVE that mapped to the technique
+        # gets its own exploitability row. Proactive/fallback techniques (and
+        # techniques whose CVEs were all gated out by EPSS) carry no motivating
+        # finding — record a single entry with finding_id=None.
+        finding_ids = motivating_finding_ids or [None]
+        max_score = 0
+        for fid in finding_ids:
+            severity = findings_by_id[fid].severity if fid in findings_by_id else None
+            score = _compute_risk(test_result.exploited, detected, severity)
+            max_score = max(max_score, score)
+            db.add(
+                SecurityMatrixEntry(
+                    run_id=run.id,
+                    finding_id=fid,
+                    test_result_id=test_result.test_result_id,
+                    is_present=True,
+                    is_exploitable=test_result.exploited,
+                    is_detectable=detected,
+                    mitre_tactic_id=test_id,
+                    risk_score=score,
+                )
+            )
         db.commit()
 
         _push_event(
@@ -332,9 +338,9 @@ async def _phase_test_loop(
                 "event": "test_complete",
                 "test_id": test_id,
                 "exploited": test_result.exploited,
-                "detected": len(alerts) > 0,
-                "risk_score": score,
-                "severity": severity,
+                "detected": detected,
+                "risk_score": max_score,
+                "motivating_cves": len([f for f in finding_ids if f is not None]),
             },
         )
 

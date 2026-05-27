@@ -89,7 +89,7 @@ GET  /runs/{id}/validations → ARTTestResult rows for the run
 
 ### Key data model
 - **AssessmentRun** (`assessment_runs`) — top-level container; status ∈ {SUBMITTED, BUILDING, SCANNING, TESTING, REBUILDING, REPORTING, COMPLETE, FAILED}; `consent_granted` must be true before any ART tests
-- **TrivyFinding** (`trivy_findings`) — per-CVE static scan result; `fix_available` flag
+- **TrivyFinding** (`trivy_findings`) — per-CVE static scan result; `fix_available` flag; `cwe_ids` (comma-joined CWEs from Trivy, drives the scan-time CWE bridge) and `epss_score` (0–1 exploitation probability, enriched from the EPSS snapshot)
 - **ARTTestResult** (`art_test_results`) — per-technique ART result; `exploited` and `crash_occurred` booleans
 - **FalcoAlert** (`falco_alerts`) — runtime alert; `test_result_id` FK links detection to the specific test that triggered it
 - **SecurityMatrixEntry** (`security_matrix_entries`) — three-dimensional output: `is_present`, `is_exploitable`, `is_detectable`, `risk_score` (0–75)
@@ -104,6 +104,12 @@ Base 10 (present) + 30 if exploited + 10 if undetected + severity weight (critic
 - In **dev mode** (`VULBOX_DEV_MODE=true`): all adapters read from `data/sample_outputs/` fixture files, no Docker/Trivy/Falco processes launched.
 - In **production mode**: `TrivyAdapter` calls `trivy` CLI, `FalcoAdapter` starts Falco sidecar, `ARTAdapter` calls `scanners/atomic_runner.sh`.
 - `TrivyAdapter.is_blocking()` always returns `False` (Non-Blocking Rule §4.12.2).
+- `ARTAdapter.build_queue` returns `List[(technique, [finding_id, ...])]` — **fan-out**: each technique runs once but every motivating CVE sharing it gets its own `SecurityMatrixEntry` (one exploitability verdict per CVE, not just one per technique). Proactive/fallback techniques carry an empty list.
+- **CWE bridging** (`data/cwe_technique_map.yml`, ~80 CWEs): when a finding's CVE isn't in the CVE→technique map, the adapter bridges the finding's `cwe_ids` to technique(s) so the CVE still gets tested. This is the main coverage lever — more detected CVEs reach an exploitability verdict.
+- **EPSS** (`app/services/epss.py`): the queue rank tuple is `(stack_relevant, ransomware, kev, -epss, idx)` so actively-predicted-exploitable CVEs are tested first. `VULBOX_EPSS_MIN` (default `0.0` = off) gates per-CVE fan-out: when raised, only CVEs at/above the threshold are attributed (KEV/ransomware always included), bounding matrix size on large scans while the technique still runs.
+
+### EPSS snapshot
+Vendored at `data/sources/epss.csv.gz` (FIRST.org daily CSV, `cve,epss,percentile`, ~335k rows). Loaded once at import by `app/services/epss.py`; a missing/corrupt file degrades to no scores (never crashes). Snapshots age — refresh with `python scripts/fetch_epss.py` (same explicit-refresh pattern as `data/sources/kev.json`). The report exposes a coverage stat: "exploitability tested for N of M detected CVEs".
 
 ### LLM remediation (Google Gemini)
 - `LLMRemediationService` (`app/services/llm_remediation.py`) generates one remediation per SecurityMatrixEntry; entries with `risk_score ≥ VULBOX_LLM_MIN_RISK_SCORE` get a Gemini call, the rest use the static `RemediationService` rule. `RunSummaryService` adds one run-level executive summary.
@@ -128,6 +134,12 @@ SQLite at `data/findings.db`. Tables auto-created on startup via `Base.metadata.
 | New Run | `/` | Submit repo URL + consent checkbox |
 | Live Status | `/runs/:id/status` | WebSocket-driven phase progress + event log |
 | Report | `/runs/:id/report` | Security Matrix table + remediations + PDF/CSV export |
+
+## Vendored sources (`data/sources/`)
+- `kev.json` — CISA Known Exploited Vulnerabilities (refresh per `scripts/build_cve_map.py` docstring).
+- `attack_to_cve.csv` — Center for Threat-Informed Defense CVE→ATT&CK mappings.
+- `epss.csv.gz` — FIRST.org EPSS daily snapshot (refresh with `scripts/fetch_epss.py`).
+- `atomics/` — vendored Atomic Red Team catalog.
 
 ## Sample fixtures
 `data/sample_outputs/` contains representative JSON outputs:

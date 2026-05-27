@@ -11,6 +11,7 @@ class TrivyVulnerability(BaseModel):
     PkgName: str
     PkgVersion: str
     FixedVersion: Optional[str] = None
+    CweIDs: List[str] = Field(default_factory=list)
 
 
 class TrivyResult(BaseModel):

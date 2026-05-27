@@ -6,6 +6,7 @@ from typing import List
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.trivy_finding import TrivyFinding
+from app.services import epss
 
 logger = get_logger(__name__)
 
@@ -55,14 +56,20 @@ class TrivyAdapter:
         findings: List[TrivyFinding] = []
         for result in raw.get("Results", []):
             for vuln in result.get("Vulnerabilities") or []:
+                cve_id = vuln.get("VulnerabilityID", "UNKNOWN")
+                # CweIDs is a list in real Trivy output (e.g. ["CWE-79"]); join
+                # so the scan-time bridge can resolve techniques per finding.
+                cwe_ids = ",".join(vuln.get("CweIDs") or [])
                 findings.append(
                     TrivyFinding(
                         run_id=run_id,
-                        cve_id=vuln.get("VulnerabilityID", "UNKNOWN"),
+                        cve_id=cve_id,
                         severity=_SEVERITY_MAP.get(vuln.get("Severity", "UNKNOWN"), "unknown"),
                         package_name=vuln.get("PkgName", ""),
                         description=vuln.get("Description", "")[:2000],
                         fix_available=bool(vuln.get("FixedVersion")),
+                        cwe_ids=cwe_ids,
+                        epss_score=epss.score_for(cve_id),
                     )
                 )
         return findings
