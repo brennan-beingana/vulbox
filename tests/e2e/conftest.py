@@ -25,7 +25,8 @@ from typing import Iterator, List
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "vulnerable_target"
+FIXTURE_BASE = Path(__file__).resolve().parent / "fixtures"
+FIXTURE_DIR = FIXTURE_BASE / "vulnerable_target"  # default target (node/express)
 DB_PATH = PROJECT_ROOT / "data" / "findings.db"
 
 
@@ -60,22 +61,20 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_falco)
 
 
-@pytest.fixture(scope="session")
-def target_path(tmp_path_factory) -> Path:
-    """Copy vulnerable_target/ into a temp dir and turn it into a git repo.
+def _git_init_repo(src_dir: Path, dest: Path) -> Path:
+    """Copy a fixture dir into ``dest`` and turn it into a git repo.
 
-    `DockerManager.clone_repo` runs `git clone --depth 1 <url>`, so the source
-    has to be a real repository. Done once per session.
+    `DockerManager.clone_repo` runs `git clone --depth 1 <url>`, so each target
+    has to be a real repository.
     """
-    if not (FIXTURE_DIR / "Dockerfile").is_file():
-        pytest.fail(f"vulnerable_target fixture missing Dockerfile: {FIXTURE_DIR}")
+    if not (src_dir / "Dockerfile").is_file():
+        pytest.fail(f"fixture missing Dockerfile: {src_dir}")
 
-    repo = tmp_path_factory.mktemp("vulnerable_target_repo")
-    for item in FIXTURE_DIR.iterdir():
+    for item in src_dir.iterdir():
         if item.is_dir():
-            shutil.copytree(item, repo / item.name)
+            shutil.copytree(item, dest / item.name)
         else:
-            shutil.copy2(item, repo / item.name)
+            shutil.copy2(item, dest / item.name)
 
     # Hermetic git identity so CI runners with no global git config still work.
     env = {
@@ -85,13 +84,39 @@ def target_path(tmp_path_factory) -> Path:
         "GIT_COMMITTER_NAME": "vulbox-e2e",
         "GIT_COMMITTER_EMAIL": "e2e@vulbox.local",
     }
-    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True, env=env)
-    subprocess.run(["git", "add", "."], cwd=repo, check=True, env=env)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=dest, check=True, env=env)
+    subprocess.run(["git", "add", "."], cwd=dest, check=True, env=env)
     subprocess.run(
-        ["git", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "vulnerable target fixture"],
-        cwd=repo, check=True, env=env,
+        ["git", "-c", "commit.gpgsign=false", "commit", "-q", "-m", f"{src_dir.name} fixture"],
+        cwd=dest, check=True, env=env,
     )
-    return repo
+    return dest
+
+
+@pytest.fixture(scope="session")
+def make_target_repo(tmp_path_factory):
+    """Factory: fixture dir name → git-initialized repo path (cached per name).
+
+    Lets the parametrized e2e suite spin up multiple stack targets while each
+    repo is materialized at most once per session.
+    """
+    cache: dict = {}
+
+    def _make(fixture_name: str) -> Path:
+        if fixture_name in cache:
+            return cache[fixture_name]
+        src = FIXTURE_BASE / fixture_name
+        repo = tmp_path_factory.mktemp(f"{fixture_name}_repo")
+        cache[fixture_name] = _git_init_repo(src, repo)
+        return cache[fixture_name]
+
+    return _make
+
+
+@pytest.fixture(scope="session")
+def target_path(make_target_repo) -> Path:
+    """Backward-compatible alias for the default node/express target repo."""
+    return make_target_repo("vulnerable_target")
 
 
 @pytest.fixture

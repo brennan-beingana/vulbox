@@ -22,6 +22,16 @@
 #     queue:
 #       must_include    list of techniques that MUST appear in build_queue().
 #       must_not_include  list that MUST NOT appear.
+#     coverage:         exploitability-coverage lift (CWE bridge + EPSS)
+#       min_ratio       tested/detected distinct CVEs must be >= this (0..1).
+#       min_tested      at least this many distinct CVEs reach a tested technique.
+#       min_bridge      at least this many tested CVEs resolved via the CWE bridge.
+#
+# Expectations are kept loose and registry-robust on purpose: exact CVE counts
+# drift with the Trivy DB, so we assert lower bounds (these are old, CVE-rich
+# images) plus the always-on T1082 technique. The harness REPORTS the precise
+# coverage/EPSS numbers per image regardless — the report is the rich artifact;
+# the expectations are just the regression tripwire.
 
 cases:
 
@@ -65,3 +75,90 @@ cases:
         min_total: 50
       queue:
         must_include: [T1082]
+
+  # =========================================================================
+  # Multi-stack (vulhub-style) corpus — one EOL base/app image per tech
+  # profile. Validates stack detection + CWE bridging + EPSS ordering across
+  # stacks. Driving vulhub's compose stacks directly isn't a fit (they're
+  # multi-container, not single-image), so we scan the stable images those
+  # environments are built on, where Trivy results stay deterministic.
+  #
+  # `coverage.min_tested: 1` is the floor that proves the CWE-bridge/EPSS path
+  # turned at least one detected CVE into a tested technique. These images are
+  # CVE-rich enough that it holds comfortably while staying DB-drift-robust.
+  # =========================================================================
+
+  # ---- Python / Flask ----------------------------------------------------
+  - name: python-2-eol
+    image: python:2.7.18-slim
+    source: registry
+    description: |
+      End-of-life Python 2.7 slim. Python stack; many base-image CVEs in the
+      Debian layer. Confirms coverage holds for a python target image.
+    expectations:
+      findings:
+        min_total: 30
+      queue:
+        must_include: [T1082]
+      coverage:
+        min_tested: 1
+
+  # ---- Node ---------------------------------------------------------------
+  - name: node-14-eol
+    image: node:14-buster-slim
+    source: registry
+    description: |
+      EOL Node 14 on Debian buster. Node stack; pairs with the dynamic
+      node/express target in tests/e2e for cross-checking static vs full.
+    expectations:
+      findings:
+        min_total: 30
+      queue:
+        must_include: [T1082]
+      coverage:
+        min_tested: 1
+
+  # ---- Java / Tomcat ------------------------------------------------------
+  - name: tomcat-9-legacy
+    image: tomcat:9.0.30-jdk8
+    source: registry
+    description: |
+      Legacy Tomcat 9 on JDK 8. Java/servlet stack; web-facing server with a
+      broad base-image + JRE CVE surface.
+    expectations:
+      findings:
+        min_total: 30
+      queue:
+        must_include: [T1082]
+      coverage:
+        min_tested: 1
+
+  # ---- PHP / Apache -------------------------------------------------------
+  - name: php-7-apache
+    image: php:7.4-apache
+    source: registry
+    description: |
+      PHP 7.4 on Apache (Debian). Classic web stack; exercises the web-facing
+      fallback/bridge path alongside the base-image CVE set.
+    expectations:
+      findings:
+        min_total: 30
+      queue:
+        must_include: [T1082]
+      coverage:
+        min_tested: 1
+
+  # ---- Ruby ---------------------------------------------------------------
+  - name: ruby-2-6-eol
+    image: ruby:2.6-slim
+    source: registry
+    description: |
+      EOL Ruby 2.6 slim. Ruby stack; bridge-leaning coverage (fewer direct
+      CVE-map hits than the web servers), a good test of the CWE fallback.
+    expectations:
+      findings:
+        min_total: 20
+      queue:
+        must_include: [T1082]
+      coverage:
+        min_tested: 1

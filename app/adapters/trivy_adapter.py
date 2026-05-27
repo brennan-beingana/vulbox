@@ -41,14 +41,34 @@ class TrivyAdapter:
 
     @staticmethod
     def _run_trivy(image_ref: str) -> dict:
-        result = subprocess.run(
-            ["trivy", "image", "--format", "json", image_ref],
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
+        # Pass --timeout to Trivy itself (its own default is 5m, which huge
+        # images like OWASP Juice Shop blow past) and give the subprocess a
+        # little extra wall-clock so Trivy can exit cleanly before we kill it.
+        scan_timeout = settings.trivy_timeout_secs
+        cmd = [
+            "trivy", "image", "--quiet",
+            "--timeout", f"{scan_timeout}s",
+            "--format", "json", image_ref,
+        ]
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=scan_timeout + 60,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"Trivy scan of {image_ref} exceeded {scan_timeout + 60}s. Large "
+                "images (e.g. OWASP Juice Shop) need more: raise "
+                "VULBOX_TRIVY_TIMEOUT_SECS, and pre-warm with "
+                "`trivy image --download-db-only` + `docker pull` so the scan "
+                "isn't also downloading the DB/image."
+            ) from exc
         if result.returncode not in (0, 1):  # 1 means vulnerabilities found, still valid
-            raise RuntimeError(f"Trivy failed: {result.stderr}")
+            raise RuntimeError(
+                f"Trivy failed (rc={result.returncode}): {result.stderr[-1000:]}"
+            )
         return json.loads(result.stdout)
 
     @staticmethod

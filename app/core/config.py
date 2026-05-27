@@ -74,5 +74,12 @@ class Settings(BaseSettings):
     # bounded while the technique itself still runs once.
     epss_min: float = Field(default=0.0, validation_alias="VULBOX_EPSS_MIN")
 
+    # Trivy scan timeout (seconds), passed to `trivy --timeout` AND used as the
+    # subprocess cap (+60s slack). Default 600 — the built-in 300 was too tight
+    # for very large images (thousands of npm/OS packages). Raise for monsters.
+    trivy_timeout_secs: int = Field(
+        default=600, validation_alias="VULBOX_TRIVY_TIMEOUT_SECS"
+    )
+
 
 settings = Settings()

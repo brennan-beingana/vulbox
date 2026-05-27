@@ -171,17 +171,30 @@ async def start_assessment(run_id: int) -> None:
             except Exception:
                 logger.exception("Sandbox destroy failed", extra={"run_id": run_id})
 
+        # A failed flush (e.g. a schema mismatch mid-pipeline) leaves the
+        # session in a rolled-back-pending state; without clearing it the
+        # status write below raises and the run is stranded non-terminal
+        # (the "stuck in SCANNING" symptom). Roll back first so the terminal
+        # status can always be committed.
+        try:
+            db.rollback()
+        except Exception:
+            logger.exception("Session rollback failed", extra={"run_id": run_id})
+
         # Resolve to a terminal status no matter what.
-        if run is not None and run.status not in ("COMPLETE", "FAILED"):
-            if failure_reason:
-                _push_event(run_id, {"event": "error", "reason": failure_reason})
-                try:
-                    (_run_dir(run_id) / "logs" / "failure.log").write_text(failure_reason)
-                except Exception:
-                    pass
-                _set_status(db, run, "FAILED")
-            else:
-                _set_status(db, run, "COMPLETE")
+        try:
+            if run is not None and run.status not in ("COMPLETE", "FAILED"):
+                if failure_reason:
+                    _push_event(run_id, {"event": "error", "reason": failure_reason})
+                    try:
+                        (_run_dir(run_id) / "logs" / "failure.log").write_text(failure_reason)
+                    except Exception:
+                        pass
+                    _set_status(db, run, "FAILED")
+                else:
+                    _set_status(db, run, "COMPLETE")
+        except Exception:
+            logger.exception("Failed to write terminal status", extra={"run_id": run_id})
         db.close()
         # Schedule queue cleanup so memory doesn't grow per run.
         asyncio.create_task(_cleanup_run_state(run_id))

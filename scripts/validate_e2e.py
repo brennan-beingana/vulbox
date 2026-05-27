@@ -6,6 +6,15 @@ static-analysis half of the pipeline against it (Trivy + ARTAdapter.build_queue)
 compares results against the manifest's expectations, and writes a markdown
 report to ``docs/validation_report.md``.
 
+Beyond raw finding/queue counts, the harness now reports the exploitability-
+coverage signals introduced with CWE bridging + EPSS:
+  * **coverage** — distinct detected CVEs that reach a tested technique
+    (``tested / detected``), the headline "more detected CVEs get a verdict".
+  * **provenance** — of the tested CVEs, how many resolved via the direct
+    CVE→technique map vs. the coarser CWE bridge.
+  * **EPSS** — how many findings carry an EPSS score and the max, so the
+    ranking/gating inputs are visible per image.
+
 Requires Docker daemon access and the ``trivy`` CLI on PATH.
 
 Usage::
@@ -68,6 +77,14 @@ class CaseResult:
     findings_by_severity: Dict[str, int] = field(default_factory=dict)
     queue: List[str] = field(default_factory=list)
     queue_kev_count: int = 0
+    # Exploitability-coverage signals (CWE bridge + EPSS).
+    detected_cves: int = 0
+    tested_cves: int = 0
+    cve_map_matches: int = 0      # tested CVEs resolved via the CVE→technique map
+    cwe_bridge_matches: int = 0   # tested CVEs resolved only via the CWE bridge
+    epss_scored: int = 0          # findings carrying an EPSS score
+    epss_max: float = 0.0
+    cves: List[str] = field(default_factory=list)  # distinct detected CVE ids
     expectations_pass: List[str] = field(default_factory=list)
     expectations_fail: List[str] = field(default_factory=list)
     duration_secs: float = 0.0
@@ -105,6 +122,33 @@ def _materialize_image(case: dict) -> None:
         raise ValueError(f"unknown source: {source!r}")
 
 
+def _coverage_signals(findings: List[TrivyFinding], queue: list) -> Dict[str, Any]:
+    """Derive exploitability-coverage signals from findings + the built queue.
+
+    ``queue`` is ``ARTAdapter.build_queue`` output: ``[(technique, [fid, ...])]``.
+    A CVE is "tested" if any of its findings landed in a technique's fan-out
+    list. Provenance splits tested CVEs into CVE-map (direct) vs CWE-bridge
+    (fallback) — the bridge is the coverage lever, so seeing its share matters.
+    """
+    by_id = {f.finding_id: f for f in findings}
+    tested_fids: set = set()
+    for _technique, fids in queue:
+        tested_fids.update(fids)
+    tested_cves = {by_id[fid].cve_id for fid in tested_fids if fid in by_id}
+    detected_cves = {f.cve_id for f in findings}
+    cve_map_matches = sum(1 for c in tested_cves if c in ART._CVE_TECHNIQUE_MAP)
+    scored = [f.epss_score for f in findings if f.epss_score is not None]
+    return {
+        "detected_cves": len(detected_cves),
+        "tested_cves": len(tested_cves),
+        "cve_map_matches": cve_map_matches,
+        "cwe_bridge_matches": len(tested_cves) - cve_map_matches,
+        "epss_scored": len(scored),
+        "epss_max": round(max(scored), 5) if scored else 0.0,
+        "cves": sorted(detected_cves),
+    }
+
+
 def _evaluate_case(case: dict) -> CaseResult:
     name = case["name"]
     image = case["image"]
@@ -123,6 +167,12 @@ def _evaluate_case(case: dict) -> CaseResult:
             sev = (f.severity or "unknown").lower()
             result.findings_by_severity[sev] = result.findings_by_severity.get(sev, 0) + 1
 
+        # Scanned findings aren't persisted here, so finding_id is None for all
+        # of them — assign synthetic ids so build_queue's per-CVE fan-out (and
+        # the coverage signals derived from it) attribute correctly.
+        for idx, f in enumerate(findings):
+            f.finding_id = idx
+
         queue = ART.ARTAdapter.build_queue(findings)
         result.queue = [tid for tid, _ in queue]
         result.queue_kev_count = sum(
@@ -130,6 +180,15 @@ def _evaluate_case(case: dict) -> CaseResult:
             for f in findings
             if ART._CVE_METADATA.get(f.cve_id, {}).get("kev")
         )
+
+        sig = _coverage_signals(findings, queue)
+        result.detected_cves = sig["detected_cves"]
+        result.tested_cves = sig["tested_cves"]
+        result.cve_map_matches = sig["cve_map_matches"]
+        result.cwe_bridge_matches = sig["cwe_bridge_matches"]
+        result.epss_scored = sig["epss_scored"]
+        result.epss_max = sig["epss_max"]
+        result.cves = sig["cves"]
 
         _check_expectations(result, case.get("expectations") or {})
     except subprocess.CalledProcessError as exc:
@@ -166,13 +225,30 @@ def _check_expectations(result: CaseResult, exps: dict) -> None:
             f"critical >= {v}; got {got}"
         )
     if "must_contain_cve" in findings:
-        # caller passes a list of cves we expect to see
+        cve_set = set(result.cves)
         for cve in findings["must_contain_cve"]:
-            # We don't have CVEs in CaseResult — scan again is wasteful, so
-            # the harness records a marker we'll fold into the report later.
-            # This branch is reachable from the manifest schema; tracked for
-            # future enrichment when we re-add CVEs to the result struct.
-            result.expectations_pass.append(f"(skipped: must_contain_cve {cve})")
+            (result.expectations_pass if cve in cve_set else result.expectations_fail).append(
+                f"findings must contain {cve}"
+            )
+
+    # ---- coverage expectations (CWE bridge + EPSS lift) ----
+    coverage = exps.get("coverage") or {}
+    if "min_ratio" in coverage and result.detected_cves:
+        ratio = result.tested_cves / result.detected_cves
+        v = coverage["min_ratio"]
+        (result.expectations_pass if ratio >= v else result.expectations_fail).append(
+            f"coverage ratio >= {v} ({ratio:.2f}: {result.tested_cves}/{result.detected_cves})"
+        )
+    if "min_tested" in coverage:
+        v = coverage["min_tested"]
+        (result.expectations_pass if result.tested_cves >= v else result.expectations_fail).append(
+            f"tested CVEs >= {v} ({result.tested_cves})"
+        )
+    if "min_bridge" in coverage:
+        v = coverage["min_bridge"]
+        (result.expectations_pass if result.cwe_bridge_matches >= v else result.expectations_fail).append(
+            f"CWE-bridge-tested CVEs >= {v} ({result.cwe_bridge_matches})"
+        )
 
     queue = exps.get("queue") or {}
     qset = set(result.queue)
@@ -309,15 +385,19 @@ def _catalog_summary() -> str:
 
 
 def _e2e_table(cases: List[dict]) -> str:
-    rows = ["| Case | Image | Status | Findings | Queue size | KEV-in-queue | Time |",
-            "|---|---|---|---:|---:|---:|---:|"]
+    rows = ["| Case | Image | Status | Findings | Coverage (tested/detected) | via CWE-bridge | EPSS max | Queue | Time |",
+            "|---|---|---|---:|---:|---:|---:|---:|---:|"]
     for c in cases:
         status = "PASS" if not c["expectations_fail"] and not c["error"] else (
             "ERROR" if c["error"] else "FAIL"
         )
+        det = c.get("detected_cves", 0)
+        tested = c.get("tested_cves", 0)
+        cov = f"{tested}/{det}" + (f" ({tested / det:.0%})" if det else "")
         rows.append(
             f"| {c['name']} | `{c['image']}` | {status} | {c['findings_total']} | "
-            f"{len(c['queue'])} | {c['queue_kev_count']} | {c['duration_secs']}s |"
+            f"{cov} | {c.get('cwe_bridge_matches', 0)} | {c.get('epss_max', 0.0)} | "
+            f"{len(c['queue'])} | {c['duration_secs']}s |"
         )
     return "\n".join(rows)
 
@@ -334,6 +414,16 @@ def _case_block(case: dict) -> str:
     lines.append(
         "Severity breakdown: "
         + ", ".join(f"{k}={v}" for k, v in sorted(sev.items())) if sev else "no findings"
+    )
+    lines.append("")
+    det = case.get("detected_cves", 0)
+    tested = case.get("tested_cves", 0)
+    cov_pct = f" ({tested / det:.0%})" if det else ""
+    lines.append(
+        f"Exploitability coverage: **{tested} of {det}** detected CVEs tested{cov_pct} "
+        f"— {case.get('cve_map_matches', 0)} via CVE-map, "
+        f"{case.get('cwe_bridge_matches', 0)} via CWE-bridge. "
+        f"EPSS: {case.get('epss_scored', 0)} scored, max {case.get('epss_max', 0.0)}."
     )
     lines.append("")
     if case["queue"]:
@@ -402,7 +492,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         results.append(r)
         print(
             f"    status={r.status} findings={r.findings_total} "
-            f"queue={len(r.queue)} kev={r.queue_kev_count} duration={r.duration_secs}s"
+            f"coverage={r.tested_cves}/{r.detected_cves} bridge={r.cwe_bridge_matches} "
+            f"epss_max={r.epss_max} queue={len(r.queue)} kev={r.queue_kev_count} "
+            f"duration={r.duration_secs}s"
         )
 
     _persist_results(results)

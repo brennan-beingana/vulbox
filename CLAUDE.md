@@ -118,6 +118,13 @@ Base 10 (present) + 30 if exploited + 10 if undetected + severity weight (critic
 ### EPSS snapshot
 Vendored at `data/sources/epss.csv.gz` (FIRST.org daily CSV, `cve,epss,percentile`, ~335k rows). Loaded once at import by `app/services/epss.py`; a missing/corrupt file degrades to no scores (never crashes). Snapshots age — refresh with `python scripts/fetch_epss.py` (same explicit-refresh pattern as `data/sources/kev.json`). The report exposes a coverage stat: "exploitability tested for N of M detected CVEs".
 
+### Validation harness
+`python scripts/validate_e2e.py` (Docker + Trivy required) runs the static half of the pipeline against the image corpus in `tests/ground_truth/manifest.yml` and writes `docs/validation_report.md`. Besides finding/queue counts it now reports the coverage signals: tested/detected CVE ratio, CVE-map vs CWE-bridge provenance split, and EPSS max per image. Manifest `expectations` support `findings.must_contain_cve` and a `coverage` block (`min_ratio`, `min_tested`, `min_bridge`). `--report-only` rebuilds the report from cached results without Docker.
+
+### Multi-stack e2e (vulhub-style)
+- **Tier A (static, in the manifest):** the corpus includes one EOL base/app image per tech profile (python / node / java-tomcat / php / ruby) on top of the alpine/debian control cases. Run via `validate_e2e.py`. vulhub's compose stacks aren't driven directly (multi-container); we scan the stable images they're built on so Trivy stays deterministic.
+- **Tier B (full dynamic, gated):** `tests/e2e/test_full_pipeline.py` is parametrized over buildable single-Dockerfile targets in `tests/e2e/fixtures/` (`vulnerable_target` = node/express, `vulnerable_python` = python/flask). Each runs the whole pipeline (build → Trivy → sandbox → ART → report) and asserts stack detection + the per-CVE coverage lift. Add a stack = one fixture dir + one row in `TARGETS`. Opt in with `pytest -m e2e` (auto-skips without Docker/Trivy/Falco).
+
 ### LLM remediation (Google Gemini)
 - `LLMRemediationService` (`app/services/llm_remediation.py`) generates one remediation per SecurityMatrixEntry; entries with `risk_score ≥ VULBOX_LLM_MIN_RISK_SCORE` get a Gemini call, the rest use the static `RemediationService` rule. `RunSummaryService` adds one run-level executive summary.
 - `GeminiProvider` (`app/services/llm_provider.py`) owns the **primary → backup** failover: one API key, `gemini-2.5-flash` serves every call, `gemini-2.5-flash-lite` is the failover on API error / 429 `RESOURCE_EXHAUSTED` / timeout. Returns parsed JSON or `None`; never raises.

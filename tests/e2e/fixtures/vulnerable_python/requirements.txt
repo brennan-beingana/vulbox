@@ -1,0 +1,9 @@
+# Pinned, EOL-era Flask stack — old enough to carry known advisories and to
+# install cleanly on python:3.6-slim. StackDetector reads this file and emits
+# the `python` + `flask` tags the e2e test asserts on.
+Flask==1.0.2
+Werkzeug==0.14.1
+Jinja2==2.10
+itsdangerous==0.24
+click==6.7
+MarkupSafe==1.0

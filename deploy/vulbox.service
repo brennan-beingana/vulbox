@@ -1,8 +1,13 @@
 # systemd unit for the VulBox API — reboot-safe replacement for `nohup uvicorn …`.
 #
-# Install (on the VM, as root):
+# !! HOST-SPECIFIC: the User and the three paths below are EXAMPLES. Edit all
+#    four to match the deployment host BEFORE installing, or systemd fails fast:
+#      status=217/USER  → the `User=` account doesn't exist on this host
+#      status=203/EXEC  → WorkingDirectory/ExecStart path is wrong or not +x
+#    (e.g. a root checkout at /home/code/vulbox needs User=root and those paths.)
+#
+# Install (as root), after editing:
 #   sudo cp deploy/vulbox.service /etc/systemd/system/vulbox.service
-#   # edit User/paths below if your checkout differs
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now vulbox
 #
@@ -13,7 +18,8 @@
 #
 # Config comes from <repo>/.env (loaded by the app and re-declared here via
 # EnvironmentFile so the value is visible to systemd too). Set VULBOX_DEV_MODE=false
-# there to keep production mode across reboots.
+# there to keep production mode across reboots. NB: stop any `nohup uvicorn` first
+# or systemd can't bind port 8000.
 
 [Unit]
 Description=VulBox Security Assessment API
@@ -22,7 +28,9 @@ Wants=network-online.target
 
 [Service]
 Type=exec
+# EDIT: match the user that owns the checkout (root for a /home/code/vulbox deploy).
 User=bbei
+# EDIT: absolute path to the repo on this host.
 WorkingDirectory=/home/bbei/Desktop/vulbox
 EnvironmentFile=-/home/bbei/Desktop/vulbox/.env
 ExecStart=/home/bbei/Desktop/vulbox/scripts/serve.sh
