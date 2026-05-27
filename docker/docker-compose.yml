@@ -12,7 +12,10 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.app
     environment:
-      - VULBOX_DEV_MODE=true
+      # Overridable from the host env; defaults to dev (fixture replay) for the
+      # zero-config compose demo. Set VULBOX_DEV_MODE=false in your shell (or
+      # export it) for a real assessment run.
+      - VULBOX_DEV_MODE=${VULBOX_DEV_MODE:-true}
     ports:
       - "8000:8000"
     volumes:

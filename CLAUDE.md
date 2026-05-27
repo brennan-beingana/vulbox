@@ -25,6 +25,13 @@ uvicorn app.main:app --reload
 # Docs: http://127.0.0.1:8000/docs
 ```
 
+### Configuration & running modes
+Config is `pydantic-settings` (`app/core/config.py`), resolved highest-priority-first: **process env → `<repo>/.env` → in-code default**. `.env` is gitignored; copy `.env.example` and edit. This is what persists production mode across restarts — set `VULBOX_DEV_MODE=false` in `.env` rather than exporting it per shell.
+
+- Verify the live mode: `GET /health` returns `{"mode": "dev"|"production", "epss_scores_loaded": N}`, and a `VulBox startup` log line echoes it on boot.
+- Durable launch: `scripts/serve.sh` (loads `.env`, runs uvicorn from the venv) or, reboot-safe, the systemd unit in `deploy/vulbox.service` (`systemctl enable --now vulbox`; logs via `journalctl -u vulbox`). Bare `nohup uvicorn …` works but does not survive reboot.
+- `docker/docker-compose.yml` no longer hardcodes dev mode — `VULBOX_DEV_MODE` is overridable from the host env (defaults to dev for the demo).
+
 ### Tests
 ```bash
 source venv/bin/activate

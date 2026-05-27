@@ -74,3 +74,8 @@ def score_for(cve_id: str) -> Optional[float]:
 def is_loaded() -> bool:
     """True if the snapshot loaded any scores (used by diagnostics/tests)."""
     return bool(_EPSS_SCORES)
+
+
+def loaded_count() -> int:
+    """Number of CVEs with an EPSS score (surfaced by /health for diagnostics)."""
+    return len(_EPSS_SCORES)

@@ -1,0 +1,33 @@
+# systemd unit for the VulBox API — reboot-safe replacement for `nohup uvicorn …`.
+#
+# Install (on the VM, as root):
+#   sudo cp deploy/vulbox.service /etc/systemd/system/vulbox.service
+#   # edit User/paths below if your checkout differs
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now vulbox
+#
+# Operate:
+#   systemctl status vulbox          # is it up? which mode? (see startup log)
+#   journalctl -u vulbox -f          # live logs (replaces stray uvicorn.log)
+#   sudo systemctl restart vulbox    # picks up .env changes
+#
+# Config comes from <repo>/.env (loaded by the app and re-declared here via
+# EnvironmentFile so the value is visible to systemd too). Set VULBOX_DEV_MODE=false
+# there to keep production mode across reboots.
+
+[Unit]
+Description=VulBox Security Assessment API
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=bbei
+WorkingDirectory=/home/bbei/Desktop/vulbox
+EnvironmentFile=-/home/bbei/Desktop/vulbox/.env
+ExecStart=/home/bbei/Desktop/vulbox/scripts/serve.sh
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
