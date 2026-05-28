@@ -56,9 +56,18 @@ class Settings(BaseSettings):
     llm_model_backup: str = Field(
         default="gemini-2.5-flash-lite", validation_alias="VULBOX_LLM_MODEL_BACKUP"
     )
+    # Entries at/above this risk_score get a Gemini call; everything else uses
+    # the static rule. Default 25 = the report's high (orange) band, so both
+    # high- and critical-band findings get LLM guidance while low/medium stay
+    # static. Raise to 40 (critical only) to spend even less quota.
     llm_min_risk_score: int = Field(
-        default=20, validation_alias="VULBOX_LLM_MIN_RISK_SCORE"
+        default=25, validation_alias="VULBOX_LLM_MIN_RISK_SCORE"
     )
+    # Hard ceiling on Gemini calls per run, on top of the risk threshold. Since
+    # entries are processed highest-risk-first, the top-N qualifying entries get
+    # the LLM; the rest fall back to static. Bounds free-tier quota/rate-limit
+    # exposure even when a run has many high/critical findings. ≤0 = no cap.
+    llm_max_calls: int = Field(default=15, validation_alias="VULBOX_LLM_MAX_CALLS")
     llm_timeout_secs: int = Field(default=30, validation_alias="VULBOX_LLM_TIMEOUT_SECS")
     llm_max_tokens: int = Field(default=1024, validation_alias="VULBOX_LLM_MAX_TOKENS")
     # Run-level executive summary: one extra Gemini call synthesising all

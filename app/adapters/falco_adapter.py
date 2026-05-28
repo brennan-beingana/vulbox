@@ -33,6 +33,14 @@ _PRIORITY_MAP = {
 
 # Per-run Falco subprocesses, keyed by run_id, so concurrent runs don't collide.
 _falco_procs: Dict[int, subprocess.Popen] = {}
+# Per-run sandbox container id, so collect_alerts can attribute host-wide Falco
+# events to the container under test (see _read_live_alerts).
+_falco_containers: Dict[int, str] = {}
+
+# Seconds to wait after launch before confirming Falco is still alive. Falco
+# needs a moment to load its driver + rules; if it has exited by then it never
+# captured a syscall and detection for this run is silently dead.
+_FALCO_STARTUP_SETTLE_SECS = 2.0
 
 
 def _run_log_path(run_id: int) -> Path:
@@ -63,22 +71,47 @@ class FalcoAdapter:
             return
 
         events_file = _run_log_path(run_id)
-        # `falco -o` overrides config. Falco watches host-wide; per-run isolation
-        # is achieved at collect-time by filtering for `container.id == <our id>`.
+        stderr_path = events_file.parent / "falco.stderr.log"
+        # JSON output is enabled purely via `-o json_output=true`; Falco has no
+        # `--json` flag and exits non-zero ("Option 'json' does not exist") if one
+        # is passed, before it ever opens the output file. `falco -o` overrides
+        # config. Falco watches host-wide; per-run isolation is achieved at
+        # collect-time by filtering for the sandbox container.id.
         cmd = [
             "falco",
-            "--json",
             "-o", "json_output=true",
             "-o", "json_include_output_property=true",
             "-o", f"file_output.filename={events_file}",
             "-o", "file_output.enabled=true",
         ]
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-        )
+        # Stderr → file, not PIPE: Falco logs continuously, and an unread PIPE
+        # buffer fills and deadlocks the process. The file also captures the
+        # reason on an early exit.
+        stderr_f = open(stderr_path, "wb")
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=stderr_f)
+        finally:
+            stderr_f.close()  # child has its own dup of the fd
+
+        # Confirm Falco survived startup. A dead process here means it captured
+        # nothing, so every finding would silently read as undetectable — log
+        # that loudly rather than completing the run with a blank detection
+        # dimension (the symptom we were debugging).
+        import time
+        time.sleep(_FALCO_STARTUP_SETTLE_SECS)
+        if proc.poll() is not None:
+            try:
+                err_tail = stderr_path.read_text()[-1000:]
+            except Exception:
+                err_tail = "<stderr unavailable>"
+            logger.error(
+                "Falco exited at startup; detection disabled for this run",
+                extra={"run_id": run_id, "exit_code": proc.returncode, "stderr": err_tail},
+            )
+            return
+
         _falco_procs[run_id] = proc
+        _falco_containers[run_id] = container_id
         logger.info(
             "Falco attached",
             extra={"container_id": container_id, "run_id": run_id, "pid": proc.pid},
@@ -87,6 +120,7 @@ class FalcoAdapter:
     @staticmethod
     def detach(run_id: int) -> None:
         """Stop this run's Falco sidecar (no-op in dev mode or if not attached)."""
+        _falco_containers.pop(run_id, None)
         proc: Optional[subprocess.Popen] = _falco_procs.pop(run_id, None)
         if proc is None:
             return
@@ -137,6 +171,7 @@ class FalcoAdapter:
         if not falco_log.exists():
             return []
         cutoff = datetime.utcnow().timestamp() - window_seconds
+        our_cid = _falco_containers.get(run_id)
         results = []
         for line in falco_log.read_text().splitlines():
             try:
@@ -149,6 +184,18 @@ class FalcoAdapter:
                     ts = datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
                 except ValueError:
                     ts = 0
-            if ts >= cutoff:
-                results.append(obj)
+            if ts < cutoff:
+                continue
+            # Falco runs host-wide; attribute only events from the sandbox under
+            # test. Match by container.id prefix because Falco reports the short
+            # 12-char id while `docker run` hands us the full 64-char one. Events
+            # with no container.id (host-scope rules) can't be attributed, so we
+            # keep them rather than silently dropping a real detection.
+            if our_cid:
+                event_cid = (obj.get("output_fields") or {}).get("container.id")
+                if event_cid and not (
+                    our_cid.startswith(event_cid) or event_cid.startswith(our_cid)
+                ):
+                    continue
+            results.append(obj)
         return results

@@ -14,10 +14,12 @@ Design notes:
   strict JSON schema. Anything that fails validation falls back to the
   static rule.
 
-* **Cost cap.** Calls only fire for entries with ``risk_score`` ≥ a
-  configurable threshold; everything else uses the static rule. Responses
-  are cached on disk keyed by (technique, motivating_cves, evidence_hash)
-  so re-runs of the same image are free.
+* **Cost cap.** Two guards bound free-tier usage: calls only fire for entries
+  with ``risk_score`` ≥ ``VULBOX_LLM_MIN_RISK_SCORE``, and a hard per-run
+  ceiling ``VULBOX_LLM_MAX_CALLS`` limits how many entries reach the LLM
+  (highest-risk first; the rest fall back to static). Responses are cached on
+  disk keyed by (technique, motivating_cves, evidence_hash) so re-runs of the
+  same image are free.
 
 * **Failure → fallback.** If the API key is missing, both models error, the
   call times out, or the response is malformed, we log and return the
@@ -143,17 +145,30 @@ class LLMRemediationService:
             .all()
         )
 
+        # Per-run ceiling on entries routed to Gemini (≤0 = unlimited). Entries
+        # are risk-sorted desc, so this keeps the highest-risk findings on the
+        # LLM path and degrades the long tail to static once the cap is hit.
+        cap = settings.llm_max_calls
+        llm_used = 0
+
         out: List[Remediation] = []
         for entry in entries:
-            if entry.risk_score < settings.llm_min_risk_score:
+            below_threshold = entry.risk_score < settings.llm_min_risk_score
+            cap_reached = cap > 0 and llm_used >= cap
+            if below_threshold or cap_reached:
                 rem = _build_static_remediation(db, entry, run_id)
             else:
+                llm_used += 1
                 rem = LLMRemediationService._build_llm_remediation(db, entry, run_id)
                 if rem is None:
                     rem = _build_static_remediation(db, entry, run_id)
             db.add(rem)
             out.append(rem)
         db.commit()
+        logger.info(
+            "LLM remediation complete",
+            extra={"run_id": run_id, "entries": len(entries), "llm_routed": llm_used, "cap": cap},
+        )
         return out
 
     @staticmethod
