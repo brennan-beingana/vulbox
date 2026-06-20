@@ -1,0 +1,157 @@
+# VulBox-tuned Falco rules
+# =========================
+# These rules exist because the stock Falco ruleset did not fire during ART
+# runs: Falco launched, loaded its driver, and ran the full window, yet wrote
+# no falco.json (file_output only creates the file once a rule matches). The
+# stock container-scoped rules (e.g. "Terminal shell in container") never
+# tripped, most likely because the container engine did not attach container
+# metadata to the docker-exec'd ART syscalls.
+#
+# Design principles:
+#   1. SELF-CONTAINED. Own lists/macros, no dependency on stock rules or their
+#      load order, so detection works even if the default ruleset is absent.
+#   2. SYSCALL-SCOPED, NOT CONTAINER-SCOPED for the high-signal rules. The ART
+#      techniques in scanners/atomic_runner.sh produce inherently suspicious
+#      file reads/writes; matching on the syscall + path means the rule fires
+#      whether or not Falco managed to attach container.id. The collect-time
+#      window + path specificity keep these attributable. (Rules that would be
+#      noisy on the host — shell exec, discovery — stay container-scoped.)
+#   3. MITRE-TAGGED. Each rule carries the ART technique id it corresponds to,
+#      so detections line up 1:1 with the techniques atomic_runner.sh executes.
+#
+# Loaded by app/adapters/falco_adapter.py via `-r`, alongside the stock rules.
+
+- required_engine_version: 0.31.0
+
+# --- Lists -------------------------------------------------------------------
+
+- list: vulbox_sensitive_files
+  items:
+    - /etc/shadow
+    - /etc/passwd
+    - /root/.bash_history
+    - /root/.ssh/id_rsa
+    - /etc/mysql/debian.cnf
+    - /var/www/.env
+    - /app/.env
+
+- list: vulbox_shell_binaries
+  items: [sh, bash, dash, ash, ksh, zsh]
+
+- list: vulbox_discovery_binaries
+  items: [uname, hostnamectl, lsb_release]
+
+# --- Macros ------------------------------------------------------------------
+
+- macro: vulbox_open_read
+  condition: >
+    (evt.type in (open, openat, openat2) and evt.is_open_read=true
+     and fd.typechar='f')
+
+- macro: vulbox_open_write
+  condition: >
+    (evt.type in (open, openat, openat2) and evt.is_open_write=true
+     and fd.typechar='f')
+
+- macro: vulbox_exec
+  condition: (evt.type in (execve, execveat) and evt.dir=<)
+
+# Containers only (engine-dependent). "host" is Falco's sentinel id for the
+# host pid namespace; anything else is a container.
+- macro: vulbox_in_container
+  condition: (container.id != host)
+
+# --- Rules -------------------------------------------------------------------
+
+# T1003 OS Credential Dumping / T1552.001 Credentials in Files
+- rule: VulBox Sensitive File Read
+  desc: >
+    A process read a well-known credential or otherwise sensitive file. Maps to
+    ART T1003 (read /etc/shadow) and T1552.001 (credential file sweep).
+  condition: vulbox_open_read and fd.name in (vulbox_sensitive_files)
+  output: >
+    VulBox sensitive file read
+    (file=%fd.name proc=%proc.cmdline pid=%proc.pid
+     container=%container.id image=%container.image.repository)
+  priority: WARNING
+  tags: [vulbox, mitre_credential_access, T1003, T1552.001]
+
+# T1611 Escape to Host — reading the host root via the init pid namespace.
+- rule: VulBox Host Filesystem Access
+  desc: >
+    A process read under /proc/1/root, i.e. the host filesystem via the init
+    process namespace — the container-escape probe in ART T1611.
+  condition: >
+    (evt.type in (open, openat, openat2)) and fd.name startswith /proc/1/root
+  output: >
+    VulBox host filesystem access via init namespace
+    (file=%fd.name proc=%proc.cmdline pid=%proc.pid container=%container.id)
+  priority: CRITICAL
+  tags: [vulbox, mitre_privilege_escalation, T1611]
+
+# T1543.002 Create or Modify System Process: systemd service (persistence)
+- rule: VulBox Systemd Unit Write
+  desc: >
+    A process wrote under a systemd unit directory — persistence via a new/
+    modified service, as in ART T1543.002.
+  condition: vulbox_open_write and fd.name startswith /etc/systemd
+  output: >
+    VulBox write to systemd directory
+    (file=%fd.name proc=%proc.cmdline pid=%proc.pid container=%container.id)
+  priority: ERROR
+  tags: [vulbox, mitre_persistence, T1543.002]
+
+# T1574 Hijack Execution Flow — writing into a shared-library search path.
+- rule: VulBox Library Path Write
+  desc: >
+    A process wrote into a shared-library search directory, a precondition for
+    library injection / LD_PRELOAD hijacking (ART T1574).
+  condition: >
+    vulbox_open_write and
+    (fd.name startswith /usr/local/lib or fd.name startswith /usr/lib
+     or fd.name startswith /lib)
+  output: >
+    VulBox shared-library path write
+    (file=%fd.name proc=%proc.cmdline pid=%proc.pid container=%container.id)
+  priority: ERROR
+  tags: [vulbox, mitre_persistence, T1574]
+
+# T1068 Exploitation for Privilege Escalation — pkexec (CVE-2021-4034, PwnKit).
+- rule: VulBox Pkexec Execution
+  desc: >
+    pkexec was executed — the polkit privilege-escalation path probed by ART
+    T1068 (CVE-2021-4034).
+  condition: vulbox_exec and proc.name = pkexec
+  output: >
+    VulBox pkexec execution
+    (proc=%proc.cmdline pid=%proc.pid container=%container.id)
+  priority: CRITICAL
+  tags: [vulbox, mitre_privilege_escalation, T1068]
+
+# T1059 / T1059.004 Command and Scripting Interpreter: Unix Shell
+- rule: VulBox Shell In Container
+  desc: >
+    A Unix shell was executed inside a container — the basic foothold in ART
+    T1059/T1059.004. Container-scoped to avoid matching the host's own shells.
+  condition: vulbox_exec and proc.name in (vulbox_shell_binaries) and vulbox_in_container
+  output: >
+    VulBox shell executed in container
+    (proc=%proc.cmdline pid=%proc.pid container=%container.id
+     image=%container.image.repository)
+  priority: NOTICE
+  tags: [vulbox, mitre_execution, T1059, T1059.004]
+
+# T1082 System Information Discovery
+- rule: VulBox System Information Discovery
+  desc: >
+    System enumeration via uname/os-release inside a container (ART T1082).
+    Container-scoped because these reads are constant background noise on a host.
+  condition: >
+    ((vulbox_exec and proc.name in (vulbox_discovery_binaries))
+     or ((evt.type in (open, openat, openat2)) and fd.name = /etc/os-release))
+    and vulbox_in_container
+  output: >
+    VulBox system information discovery
+    (proc=%proc.cmdline file=%fd.name pid=%proc.pid container=%container.id)
+  priority: NOTICE
+  tags: [vulbox, mitre_discovery, T1082]

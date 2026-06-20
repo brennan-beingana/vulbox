@@ -37,10 +37,51 @@ _falco_procs: Dict[int, subprocess.Popen] = {}
 # events to the container under test (see _read_live_alerts).
 _falco_containers: Dict[int, str] = {}
 
-# Seconds to wait after launch before confirming Falco is still alive. Falco
-# needs a moment to load its driver + rules; if it has exited by then it never
-# captured a syscall and detection for this run is silently dead.
-_FALCO_STARTUP_SETTLE_SECS = 2.0
+# Seconds to wait after launch before confirming Falco is still alive AND before
+# the first ART test runs. Falco needs several seconds to compile+load its BPF
+# driver; until then it captures no syscalls, so a test that fires too early is
+# invisible. Sleeping here serves double duty: it lets the driver come up before
+# the orchestrator starts the test loop, and if Falco has instead exited (e.g. a
+# rules parse error) poll() catches it and detection is reported dead loudly
+# rather than silently reading every finding as undetectable.
+_FALCO_STARTUP_SETTLE_SECS = 6.0
+
+# Bundled VulBox rules tuned to the exact syscalls scanners/atomic_runner.sh
+# produces. The stock ruleset did not fire on the docker-exec'd ART activity
+# (no container metadata attached → container-scoped rules never matched), so
+# Falco wrote no output file at all. These guarantee a match on the techniques
+# we actually run. See the file header for the design rationale.
+_VULBOX_RULES = settings.project_root / "deploy" / "falco" / "vulbox_rules.yaml"
+
+# Stock Falco rules locations, probed in order. Loading these explicitly keeps
+# the default coverage when we override rules_files on the command line with -r.
+_STOCK_RULES_CANDIDATES = (
+    "/etc/falco/falco_rules.yaml",
+    "/etc/falco/falco_rules.local.yaml",
+    "/etc/falco/rules.d",
+)
+
+
+def _rules_args() -> List[str]:
+    """Build the `-r <path>` arguments: stock rules (whichever exist) + ours.
+
+    Passing `-r` on the command line overrides the `rules_files` list in
+    falco.yaml, so we re-add the stock paths to preserve default coverage and
+    then append the bundled VulBox rules. If no stock rules are present we still
+    load ours, so VulBox detection works on a host with a bare Falco install.
+    """
+    args: List[str] = []
+    for path in _STOCK_RULES_CANDIDATES:
+        if os.path.exists(path):
+            args += ["-r", path]
+    if _VULBOX_RULES.exists():
+        args += ["-r", str(_VULBOX_RULES)]
+    else:
+        logger.warning(
+            "VulBox Falco rules file missing; relying on stock rules only",
+            extra={"expected_path": str(_VULBOX_RULES)},
+        )
+    return args
 
 
 def _run_log_path(run_id: int) -> Path:
@@ -84,6 +125,10 @@ class FalcoAdapter:
             "-o", f"file_output.filename={events_file}",
             "-o", "file_output.enabled=true",
         ]
+        # Load stock rules (if present) plus the bundled VulBox rules so a match
+        # is guaranteed on the ART techniques we run — otherwise file_output
+        # never creates falco.json and detection is silently empty.
+        cmd += _rules_args()
         # Stderr → file, not PIPE: Falco logs continuously, and an unread PIPE
         # buffer fills and deadlocks the process. The file also captures the
         # reason on an early exit.
@@ -93,10 +138,11 @@ class FalcoAdapter:
         finally:
             stderr_f.close()  # child has its own dup of the fd
 
-        # Confirm Falco survived startup. A dead process here means it captured
-        # nothing, so every finding would silently read as undetectable — log
-        # that loudly rather than completing the run with a blank detection
-        # dimension (the symptom we were debugging).
+        # Wait out the driver-load window, then confirm Falco survived startup.
+        # A dead process here means it captured nothing (e.g. a rules parse
+        # error), so every finding would silently read as undetectable — log that
+        # loudly rather than completing the run with a blank detection dimension
+        # (the symptom we were debugging).
         import time
         time.sleep(_FALCO_STARTUP_SETTLE_SECS)
         if proc.poll() is not None:

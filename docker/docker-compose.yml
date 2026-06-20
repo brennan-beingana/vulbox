@@ -48,6 +48,9 @@ services:
       - /usr:/host/usr:ro
       - /etc:/host/etc:ro
       - ../data/falco:/var/log/falco
+      # VulBox-tuned rules, dropped into Falco's auto-loaded rules.d so the
+      # sidecar fires on ART activity (stock rules alone did not). Read-only.
+      - ../deploy/falco/vulbox_rules.yaml:/etc/falco/rules.d/vulbox_rules.yaml:ro
     environment:
       - FALCO_BPF_PROBE=
     networks:
