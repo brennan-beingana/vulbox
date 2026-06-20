@@ -1,0 +1,44 @@
+# systemd unit for the VulBox frontend (Vite production build + preview) — keeps
+# the UI up across reboots so you don't re-run `npm run dev --host` by hand. The
+# wrapper builds on start, then serves the bundle (no hot-reload; restart the
+# unit to pick up frontend code changes).
+#
+# !! HOST-SPECIFIC: edit User and the two paths below to match this host BEFORE
+#    installing, or systemd fails fast:
+#      status=217/USER  → the `User=` account doesn't exist on this host
+#      status=203/EXEC  → WorkingDirectory/ExecStart path is wrong or not +x
+#
+# One-time: install frontend deps first (the unit does not run `npm install`):
+#   cd frontend && npm install
+#
+# Install (as root), after editing:
+#   sudo cp deploy/vulbox-frontend.service /etc/systemd/system/vulbox-frontend.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now vulbox-frontend
+#
+# Operate:
+#   systemctl status vulbox-frontend       # is it up?
+#   journalctl -u vulbox-frontend -f       # live logs
+#   sudo systemctl restart vulbox-frontend
+#
+# Override host/port via the [Service] Environment lines below.
+
+[Unit]
+Description=VulBox Frontend (Vite build + preview)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+# EDIT: match the user that owns the checkout (must be the user nvm is installed for).
+User=bbei
+# EDIT: absolute path to the repo on this host.
+WorkingDirectory=/home/bbei/Desktop/vulbox/frontend
+Environment=HOST=0.0.0.0
+Environment=PORT=5173
+ExecStart=/home/bbei/Desktop/vulbox/scripts/serve-frontend.sh
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
