@@ -1,0 +1,124 @@
+# Curated vulhub corpus for the full-pipeline harness (scripts/validate_vulhub.py).
+#
+# Why these envs: of vulhub's 328 environments only ~22 are single-service AND
+# build from a local Dockerfile (the rest pull prebuilt vulhub/* images or are
+# multi-container). Of those 22, nine are near-identical struts2 WAR variants on
+# the same tomcat:8.5 base — they produce duplicate Trivy/ART output, so we keep
+# one. The set below is the de-duplicated ~10 that maximize *distinct stack*
+# breadth (Java / PHP / Node / Ruby / C / Go) rather than instance count.
+#
+# Each env is fed to VulBox's real pipeline by copying its vulhub subdir into a
+# throwaway git repo, injecting `.vulbox.yml` (the `sandbox:` block below), and
+# POSTing a run. VulBox builds the subdir's Dockerfile (which `FROM vulhub/*`,
+# pulling the base from Docker Hub), sandboxes it, runs ART, and reports.
+#
+# Field reference:
+#   name        slug; surfaces in the report.
+#   subpath     path within the vulhub repo (the env directory with the Dockerfile).
+#   stack       human label for the report; not asserted.
+#   sandbox     written verbatim as `.vulbox.yml`'s `sandbox:` block. The product
+#               default is network=none + read_only=true; most of these servers
+#               (tomcat/apache/rails/es) crash under --read-only because they
+#               write logs/work/data dirs, so we relax read_only here. Network
+#               stays `none` — ART drives the container via `docker exec`, not the
+#               network, so no published ports are needed.
+#   note        operational caveat for the reader.
+#   expectations (loose lower bounds; the report carries the precise numbers):
+#     findings.min_total   at least this many Trivy findings.
+#     coverage.min_tested  at least this many distinct CVEs reach a tested technique.
+
+defaults:
+  sandbox:
+    network: none
+    read_only: false
+
+cases:
+
+  # ---- Java / Struts2 (one representative of the 9 variants) --------------
+  - name: struts2-s2-001
+    subpath: struts2/s2-001
+    stack: java/tomcat (struts2)
+    expectations:
+      findings: {min_total: 20}
+      coverage: {min_tested: 1}
+
+  # ---- Java / Tomcat -----------------------------------------------------
+  - name: tomcat-cve-2017-12615
+    subpath: tomcat/CVE-2017-12615
+    stack: java/tomcat
+    expectations:
+      findings: {min_total: 20}
+      coverage: {min_tested: 1}
+
+  # ---- Java / Elasticsearch ----------------------------------------------
+  - name: elasticsearch-cve-2015-5531
+    subpath: elasticsearch/CVE-2015-5531
+    stack: java/elasticsearch
+    note: >
+      Elasticsearch 1.4.4 is the heaviest target — old JVM, heap-hungry, and
+      sensitive to vm.max_map_count. Most likely single env to fail to stay
+      running; reported per-env rather than aborting the batch.
+    expectations:
+      findings: {min_total: 10}
+      coverage: {min_tested: 1}
+
+  # ---- PHP / Apache ------------------------------------------------------
+  - name: httpd-cve-2021-41773
+    subpath: httpd/CVE-2021-41773
+    stack: c/apache-httpd
+    expectations:
+      findings: {min_total: 10}
+      coverage: {min_tested: 1}
+
+  # ---- PHP / gitlist -----------------------------------------------------
+  - name: gitlist-cve-2018-1000533
+    subpath: gitlist/CVE-2018-1000533
+    stack: php/gitlist
+    expectations:
+      findings: {min_total: 10}
+      coverage: {min_tested: 1}
+
+  # ---- Node --------------------------------------------------------------
+  - name: node-cve-2017-14849
+    subpath: node/CVE-2017-14849
+    stack: node/express
+    expectations:
+      findings: {min_total: 10}
+      coverage: {min_tested: 1}
+
+  # ---- Ruby / Rails ------------------------------------------------------
+  - name: rails-cve-2019-5418
+    subpath: rails/CVE-2019-5418
+    stack: ruby/rails
+    expectations:
+      findings: {min_total: 10}
+      coverage: {min_tested: 1}
+
+  # ---- C / OpenSSH -------------------------------------------------------
+  - name: openssh-cve-2018-15473
+    subpath: openssh/CVE-2018-15473
+    stack: c/openssh
+    expectations:
+      findings: {min_total: 5}
+      coverage: {min_tested: 1}
+
+  # ---- C / rsync ---------------------------------------------------------
+  - name: rsync-common
+    subpath: rsync/common
+    stack: c/rsync
+    expectations:
+      findings: {min_total: 5}
+      coverage: {min_tested: 1}
+
+  # ---- Go / docker (open daemon RCE) -------------------------------------
+  - name: docker-unauthorized-rce
+    subpath: docker/unauthorized-rce
+    stack: go/docker-dind
+    note: >
+      Runs an exposed Docker daemon (dind), which normally needs --privileged —
+      VulBox's sandbox does not grant that, so this env may fail to stay running.
+      Kept as the single Go/infra breadth sample; a FAIL here is expected and
+      informative, not a harness bug.
+    expectations:
+      findings: {min_total: 5}
+      coverage: {min_tested: 1}

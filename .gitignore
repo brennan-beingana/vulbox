@@ -6,4 +6,7 @@ node_modules/
 frontend/node_modules/
 .env
 data/*.db
+# vulhub full-pipeline harness artifacts (scripts/validate_vulhub.py)
+data/sources/vulhub/
+data/validation/
 .DS_Store
