@@ -62,7 +62,12 @@ VULHUB_REF = "master"
 
 # Dedicated DB + production mode, set BEFORE app import (mirrors tests/e2e/conftest).
 os.environ["VULBOX_DEV_MODE"] = "false"
-os.environ.setdefault("VULBOX_FALCO_ENABLED", os.getenv("VULBOX_FALCO_ENABLED", "false"))
+# Falco drives the detectability dimension. FalcoAdapter reads VULBOX_FALCO_ENABLED
+# straight from the process env (default "true"), so auto-enable it when the falco
+# binary is present (e.g. on the VM) and leave it off on a host without falco so
+# `attach` doesn't fail the pipeline. An explicit VULBOX_FALCO_ENABLED always wins.
+if "VULBOX_FALCO_ENABLED" not in os.environ:
+    os.environ["VULBOX_FALCO_ENABLED"] = "true" if shutil.which("falco") else "false"
 os.environ["DATABASE_URL"] = f"sqlite:///{PROJECT_ROOT / 'data' / 'vulhub_findings.db'}"
 
 _GIT_ENV = {
