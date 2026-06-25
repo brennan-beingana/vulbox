@@ -12,8 +12,9 @@ function PlusIcon() {
   );
 }
 
-// Slider stops, ordered most-permissive → most-restrictive (left → right).
-const SEVERITY_STOPS = ['low', 'medium', 'high', 'critical'];
+// Slider stops, ordered most-severe → least-severe (left → right), so the
+// native left-of-thumb fill stays on the high-severity (left) side.
+const SEVERITY_STOPS = ['critical', 'high', 'medium', 'low'];
 const SEVERITY_LABELS = {
   low: 'Low — test every finding (largest report)',
   medium: 'Medium — Critical, High & Medium',
