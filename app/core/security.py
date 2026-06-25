@@ -37,16 +37,10 @@ def decode_token(token: str) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 
-def get_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
-    db: Session = Depends(get_db),
-):
+def _user_from_token(token: str, db: Session):
     from app.models.user import User
 
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-
-    payload = decode_token(credentials.credentials)
+    payload = decode_token(token)
     email: str = payload.get("sub")
     if not email:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
@@ -55,6 +49,30 @@ def get_current_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return user
+
+
+def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+):
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return _user_from_token(credentials.credentials, db)
+
+
+def get_current_user_flexible(
+    token: Optional[str] = None,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+):
+    """Like get_current_user, but also accepts the JWT via a `token` query param.
+    Browser-initiated downloads (window.open / <a href>) can't set an
+    Authorization header, so the file-export endpoint falls back to the query
+    string. Header takes precedence when both are present."""
+    raw = credentials.credentials if credentials is not None else token
+    if not raw:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return _user_from_token(raw, db)
 
 
 def require_admin(current_user=Depends(get_current_user)):

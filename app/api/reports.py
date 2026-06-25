@@ -7,7 +7,7 @@ from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_current_user_flexible
 from app.models.detected_technology import DetectedTechnology
 from app.models.remediation import Remediation
 from app.models.run_summary import RunSummary
@@ -165,7 +165,7 @@ def export_report(
     run_id: int,
     format: str = Query(default="json", pattern="^(json|csv|pdf)$"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_flexible),
 ):
     run = RunService.authorize(RunService.get_run(db, run_id), current_user)
     findings = db.query(TrivyFinding).filter(TrivyFinding.run_id == run_id).all()
