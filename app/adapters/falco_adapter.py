@@ -1,7 +1,8 @@
 import json
 import os
+import re
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -88,6 +89,38 @@ def _run_log_path(run_id: int) -> Path:
     p = settings.project_root / "data" / "runs" / str(run_id) / "falco.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def _event_epoch(obj: dict) -> Optional[float]:
+    """Best-effort epoch-seconds for a Falco event.
+
+    Falco emits `time` as an ISO string with **nanosecond** precision
+    (9 fractional digits). `datetime.fromisoformat` on Python < 3.11 rejects
+    more than 6 fractional digits, so on the 3.10 deploy host every event
+    raised ValueError and was treated as ts=0 — i.e. "infinitely old" — which
+    silently filtered out the entire detection dimension. We therefore prefer
+    the unambiguous integer nanosecond epoch (`output_fields["evt.time"]`) and
+    only fall back to parsing the string (with the fraction trimmed to 6 digits).
+    Returns None when no timestamp can be recovered — callers must NOT treat
+    that as old (that was the original trap).
+    """
+    nanos = (obj.get("output_fields") or {}).get("evt.time")
+    if isinstance(nanos, (int, float)):
+        return nanos / 1e9
+
+    raw = obj.get("ts") or obj.get("time")
+    if isinstance(raw, (int, float)):
+        # Some builds put a nanosecond epoch in top-level "ts".
+        return raw / 1e9 if raw > 1e12 else float(raw)
+    if isinstance(raw, str):
+        s = raw.replace("Z", "+00:00")
+        # Trim fractional seconds to 6 digits for fromisoformat on Python 3.10.
+        s = re.sub(r"(\.\d{6})\d+", r"\1", s)
+        try:
+            return datetime.fromisoformat(s).timestamp()
+        except ValueError:
+            return None
+    return None
 
 
 class FalcoAdapter:
@@ -216,7 +249,9 @@ class FalcoAdapter:
         falco_log = _run_log_path(run_id)
         if not falco_log.exists():
             return []
-        cutoff = datetime.utcnow().timestamp() - window_seconds
+        # Timezone-aware UTC: datetime.utcnow().timestamp() interprets the naive
+        # value as *local* time, skewing the window on non-UTC hosts.
+        cutoff = datetime.now(timezone.utc).timestamp() - window_seconds
         our_cid = _falco_containers.get(run_id)
         results = []
         for line in falco_log.read_text().splitlines():
@@ -224,13 +259,11 @@ class FalcoAdapter:
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            ts = obj.get("ts") or obj.get("time") or 0
-            if isinstance(ts, str):
-                try:
-                    ts = datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
-                except ValueError:
-                    ts = 0
-            if ts < cutoff:
+            ts = _event_epoch(obj)
+            # Only exclude on time when we actually have a timestamp; an
+            # unparseable one must not silently drop a real detection (the bug
+            # that zeroed the whole detection dimension on the 3.10 host).
+            if ts is not None and ts < cutoff:
                 continue
             # Falco runs host-wide; attribute only events from the sandbox under
             # test. Match by container.id prefix because Falco reports the short
