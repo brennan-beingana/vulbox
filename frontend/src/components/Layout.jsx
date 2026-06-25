@@ -99,7 +99,6 @@ export default function Layout({ children, title, breadcrumb }) {
             <IconShield />
           </div>
           <span className="brand-name">VulBox</span>
-          <span className="brand-version">Beta</span>
         </div>
 
         <nav className="sidebar-nav">

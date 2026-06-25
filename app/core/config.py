@@ -36,6 +36,13 @@ class Settings(BaseSettings):
     )
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24  # 24 hours
+
+    # Bootstrap admin. Seeded once at startup if no user with this email exists,
+    # so there is always an account that can see every run (run-scoping below).
+    # Self-registration always creates a `provider`, so an admin can only be
+    # minted here. Leave admin_email blank to disable seeding.
+    admin_email: str = Field(default="", validation_alias="VULBOX_ADMIN_EMAIL")
+    admin_password: str = Field(default="", validation_alias="VULBOX_ADMIN_PASSWORD")
     # Dev mode replays fixtures and never launches Docker/Trivy/Falco. Default
     # True keeps the demo/test path zero-config; set VULBOX_DEV_MODE=false in
     # .env for a real assessment host.

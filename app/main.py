@@ -3,8 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import api_router
 from app.core.config import settings
-from app.core.database import Base, engine
+from app.core.database import Base, SessionLocal, engine
 from app.core.logging import get_logger
+from app.core.security import ROLE_ADMIN, hash_password
 from app.services import epss
 from app import models  # noqa: F401 — ensures all tables are registered
 
@@ -25,9 +26,35 @@ app.add_middleware(
 )
 
 
+def _seed_admin() -> None:
+    """Idempotently ensure the bootstrap admin from settings exists, so there is
+    always one account that can see every run. No-op if admin_email is blank or
+    the user already exists (password is never reset here)."""
+    if not settings.admin_email or not settings.admin_password:
+        return
+    from app.models.user import User
+
+    db = SessionLocal()
+    try:
+        if db.query(User).filter(User.email == settings.admin_email).first():
+            return
+        db.add(
+            User(
+                email=settings.admin_email,
+                hashed_password=hash_password(settings.admin_password),
+                role=ROLE_ADMIN,
+            )
+        )
+        db.commit()
+        logger.info("Seeded bootstrap admin", extra={"email": settings.admin_email})
+    finally:
+        db.close()
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     Base.metadata.create_all(bind=engine)
+    _seed_admin()
     # Make the running mode unmistakable in the logs — the #1 source of
     # "why did it fall back to dev?" confusion is not knowing which mode is live.
     logger.info(

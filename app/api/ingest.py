@@ -8,9 +8,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.security import get_current_user
 from app.models.art_test_result import ARTTestResult
 from app.models.falco_alert import FalcoAlert
 from app.models.trivy_finding import TrivyFinding
+from app.models.user import User
 from app.schemas.atomic import AtomicIngestionPayload, AtomicResponse
 from app.schemas.falco import FalcoIngestionPayload, FalcoResponse
 from app.schemas.trivy import TrivyIngestionPayload, TrivyResponse
@@ -26,8 +28,13 @@ _PRIORITY_MAP = {
 
 
 @router.post("/trivy", response_model=TrivyResponse)
-def ingest_trivy(run_id: int, payload: TrivyIngestionPayload, db: Session = Depends(get_db)):
-    RunService.get_run(db, run_id)
+def ingest_trivy(
+    run_id: int,
+    payload: TrivyIngestionPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    RunService.authorize(RunService.get_run(db, run_id), current_user)
     findings = []
     for result in payload.results:
         for vuln in result.Vulnerabilities:
@@ -48,8 +55,13 @@ def ingest_trivy(run_id: int, payload: TrivyIngestionPayload, db: Session = Depe
 
 
 @router.post("/falco", response_model=FalcoResponse)
-def ingest_falco(run_id: int, payload: FalcoIngestionPayload, db: Session = Depends(get_db)):
-    RunService.get_run(db, run_id)
+def ingest_falco(
+    run_id: int,
+    payload: FalcoIngestionPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    RunService.authorize(RunService.get_run(db, run_id), current_user)
     alerts = []
     for alert in payload.alerts:
         a = FalcoAlert(
@@ -67,8 +79,13 @@ def ingest_falco(run_id: int, payload: FalcoIngestionPayload, db: Session = Depe
 
 
 @router.post("/atomic", response_model=AtomicResponse)
-def ingest_atomic(run_id: int, payload: AtomicIngestionPayload, db: Session = Depends(get_db)):
-    RunService.get_run(db, run_id)
+def ingest_atomic(
+    run_id: int,
+    payload: AtomicIngestionPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    RunService.authorize(RunService.get_run(db, run_id), current_user)
     results = []
     for test in payload.tests:
         r = ARTTestResult(

@@ -7,12 +7,14 @@ from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.security import get_current_user
 from app.models.detected_technology import DetectedTechnology
 from app.models.remediation import Remediation
 from app.models.run_summary import RunSummary
 from app.models.security_matrix_entry import SecurityMatrixEntry
 from app.models.trivy_finding import TrivyFinding
 from app.models.art_test_result import ARTTestResult
+from app.models.user import User
 from app.schemas.report import (
     CoverageSchema,
     DetectedTechnologySchema,
@@ -98,8 +100,12 @@ router = APIRouter(prefix="/reports", tags=["reporting"])
 
 
 @router.get("/{run_id}", response_model=ReportResponse)
-def get_report(run_id: int, db: Session = Depends(get_db)):
-    run = RunService.get_run(db, run_id)
+def get_report(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    run = RunService.authorize(RunService.get_run(db, run_id), current_user)
 
     findings = db.query(TrivyFinding).filter(TrivyFinding.run_id == run_id).all()
     findings_by_id = {f.finding_id: f for f in findings}
@@ -159,8 +165,9 @@ def export_report(
     run_id: int,
     format: str = Query(default="json", pattern="^(json|csv|pdf)$"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    run = RunService.get_run(db, run_id)
+    run = RunService.authorize(RunService.get_run(db, run_id), current_user)
     findings = db.query(TrivyFinding).filter(TrivyFinding.run_id == run_id).all()
     findings_by_id = {f.finding_id: f for f in findings}
     matrix = (
@@ -171,9 +178,9 @@ def export_report(
     matrix.sort(key=lambda e: _entry_sort_key(e, findings_by_id), reverse=True)
 
     if format == "json":
-        # Reuse the standard report endpoint
+        # Reuse the standard report endpoint (already authorized above).
         from fastapi.encoders import jsonable_encoder
-        report = get_report(run_id, db)
+        report = get_report(run_id, db, current_user)
         return jsonable_encoder(report)
 
     if format == "csv":
