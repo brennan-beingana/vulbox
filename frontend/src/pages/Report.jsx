@@ -314,14 +314,17 @@ export default function Report() {
               <p>Lower the minimum severity or risk score to see more.</p>
             </div>
           ) : filteredRemediations.map(r => (
-            <div key={r.id} className={`rem-card acc-${r.confidence}`}>
+            <div key={r.id} className={`rem-card${r.severity ? ` acc-${r.severity}` : ''}`}>
               <div className="rem-header">
                 <div className="rem-summary">{r.summary}</div>
                 <span className="rem-badges">
+                  <SeverityCell severity={r.severity} />
                   <span className={`badge ${r.generated_by === 'llm' ? 'badge-info' : 'badge-neutral'}`}>
                     {r.generated_by === 'llm' ? '✨ AI' : 'rule'}
                   </span>
-                  <span className={`badge ${confidenceBadge(r.confidence)}`}>{r.confidence}</span>
+                  <span className="badge badge-neutral" title="Remediation confidence (not severity)">
+                    Confidence: {r.confidence}
+                  </span>
                 </span>
               </div>
               <div className="rem-field">

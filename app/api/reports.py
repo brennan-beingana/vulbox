@@ -256,7 +256,6 @@ def export_report(
 # matches the dashboard.
 _PDF_FONT = "-apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
 _PDF_MONO = "'SF Mono', 'DejaVu Sans Mono', 'Consolas', monospace"
-_CONF_ACCENT = {"critical": "#dc2626", "high": "#d97706", "medium": "#2563eb", "low": "#059669"}
 # (background, text) for confidence/AI badges.
 _CONF_BADGE = {
     "critical": ("#fee2e2", "#dc2626"),
@@ -419,6 +418,14 @@ def _render_pdf_html(
     # ---- remediation cards ----
     rem_html = ""
     if remediations:
+        # Severity comes from the card's matrix entry → motivating finding, so
+        # the card shows the same severity as the matrix (one authoritative
+        # badge) instead of baking it into the summary text.
+        entry_sev = {}
+        for e in matrix:
+            f = findings_by_id.get(e.finding_id)
+            entry_sev[e.entry_id] = f.severity if f else None
+
         def _field(label: str, value_html: str) -> str:
             return (
                 "<div style='margin:6px 0;'>"
@@ -429,7 +436,14 @@ def _render_pdf_html(
 
         cards = []
         for r in remediations:
-            accent = _CONF_ACCENT.get((r.confidence or "").lower(), "#e4e8f0")
+            sev = entry_sev.get(r.matrix_entry_id)
+            # Accent + badge follow severity (matrix palette); proactive
+            # CVE-less cards have no severity → neutral accent, no badge.
+            accent = {"critical": "#dc2626", "high": "#ea580c", "medium": "#d97706", "low": "#059669"}.get(
+                (sev or "").lower(), "#e4e8f0"
+            )
+            sev_badge = _sev_cell(sev) if sev else ""
+            conf_badge = _badge(f"confidence: {r.confidence}", "#f3f4f6", "#6b7280")
             ai = _badge("AI", "#dbeafe", "#2563eb") if r.generated_by == "llm" else _badge("rule", "#f3f4f6", "#6b7280")
             body = (
                 _field("Priority action", esc(r.priority_action))
@@ -456,7 +470,7 @@ def _render_pdf_html(
                 f"<div class='rem' style='border-left:3px solid {accent};'>"
                 "<div style='margin-bottom:6px;'>"
                 f"<span style='font-size:12px;font-weight:700;color:#111827;'>{esc(r.summary)}</span> &nbsp; "
-                f"{ai} {_conf_badge(r.confidence)}</div>"
+                f"{sev_badge} {ai} {conf_badge}</div>"
                 f"{body}</div>"
             )
         rem_html = "<div class='section-label'>Remediation Actions</div>" + "".join(cards)

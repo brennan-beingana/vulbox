@@ -241,6 +241,41 @@ def test_fanout_groups_findings_under_one_technique(monkeypatch):
     assert sorted(queue["T1190"]) == [1, 2]
 
 
+def test_same_cve_across_packages_collapses_to_one_row(monkeypatch):
+    # One CVE affecting several packages = several Trivy findings. They must
+    # collapse to a single motivating finding under the technique, not one row
+    # per package (the matrix-noise fix).
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-MULTI", "T1190")
+    findings = [
+        _f("CVE-MULTI", pkg="libc-bin", finding_id=1),
+        _f("CVE-MULTI", pkg="libc6", finding_id=2),
+        _f("CVE-MULTI", pkg="e2fsprogs", finding_id=3),
+    ]
+    queue = dict(ART.ARTAdapter.build_queue(findings))
+    assert len(queue["T1190"]) == 1
+
+
+def test_dedupe_keeps_highest_severity_finding(monkeypatch):
+    # When the per-package findings disagree on severity, the surviving row is
+    # the highest-severity one so the matrix shows the worst case.
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-SEV", "T1190")
+    findings = [
+        _f("CVE-SEV", severity="medium", pkg="libc6", finding_id=1),
+        _f("CVE-SEV", severity="critical", pkg="libc-bin", finding_id=2),
+    ]
+    queue = dict(ART.ARTAdapter.build_queue(findings))
+    assert queue["T1190"] == [2]
+
+
+def test_distinct_cves_still_both_fan_out(monkeypatch):
+    # Dedup is per-CVE only — two different CVEs on one technique both survive.
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-X", "T1190")
+    monkeypatch.setitem(ART._CVE_TECHNIQUE_MAP, "CVE-Y", "T1190")
+    findings = [_f("CVE-X", finding_id=1), _f("CVE-Y", finding_id=2)]
+    queue = dict(ART.ARTAdapter.build_queue(findings))
+    assert sorted(queue["T1190"]) == [1, 2]
+
+
 def test_proactive_and_fallback_carry_empty_finding_list():
     findings = [_f("CVE-2099-0003", severity="low", pkg="rare-pkg", desc="x")]
     queue = ART.ARTAdapter.build_queue(findings)

@@ -216,6 +216,31 @@ def _passes_severity_gate(finding: TrivyFinding, min_severity: Optional[str]) ->
     return _SEVERITY_RANK.get((finding.severity or "unknown").lower(), 0) >= floor
 
 
+def _dedupe_findings_by_cve(findings: List[TrivyFinding]) -> List[int]:
+    """Collapse package-level findings to one finding_id per CVE.
+
+    Trivy emits one finding per (CVE × affected package), so a single CVE that
+    touches N packages (e.g. CVE-2022-1304 across libc-bin/libc6/e2fsprogs/…)
+    produces N near-identical findings. Fanning all of them out gave N duplicate
+    SecurityMatrixEntry rows — and N duplicate remediations — with one identical
+    exploitability verdict. We keep the highest-severity finding per CVE (severity
+    is normally uniform per CVE within an image; highest is the safe choice) and
+    preserve first-seen order, which is the caller's priority order.
+    """
+    best: Dict[str, TrivyFinding] = {}
+    order: List[str] = []
+    for f in findings:
+        cur = best.get(f.cve_id)
+        if cur is None:
+            best[f.cve_id] = f
+            order.append(f.cve_id)
+        elif _SEVERITY_RANK.get((f.severity or "unknown").lower(), 0) > _SEVERITY_RANK.get(
+            (cur.severity or "unknown").lower(), 0
+        ):
+            best[f.cve_id] = f
+    return [best[c].finding_id for c in order]
+
+
 def _fallback_matches(rule: Dict[str, Any], findings: List[TrivyFinding]) -> bool:
     """Return True if the rule's match preconditions are satisfied by findings."""
     match = rule.get("match") or {}
@@ -276,14 +301,16 @@ class ARTAdapter:
                 seen.add(tid)
                 # Fan-out: every finding whose CVE (or CWE bridge) resolves to
                 # this technique and clears the EPSS gate motivates the test.
-                fids = [
-                    f.finding_id
+                # Deduped to one finding per CVE so a CVE spanning many packages
+                # doesn't produce duplicate matrix rows.
+                matching = [
+                    f
                     for f in trivy_findings
                     if tid in ARTAdapter._techniques_for_finding(f)
                     and _passes_severity_gate(f, min_severity)
                     and _passes_epss_gate(f, _CVE_METADATA.get(f.cve_id, {}))
                 ]
-                queue.append((tid, fids))
+                queue.append((tid, _dedupe_findings_by_cve(matching)))
             return queue
 
         priority: List[Tuple[str, List[int]]] = []
@@ -294,7 +321,7 @@ class ARTAdapter:
         # ranked independently, then grouped so each technique runs once with
         # all its motivating findings. Lower rank tuple = higher priority.
         profile_tags = tech_profile.tags() if tech_profile else set()
-        records: List[Tuple[tuple, str, int]] = []
+        records: List[Tuple[tuple, str, TrivyFinding]] = []
         for idx, finding in enumerate(trivy_findings):
             techniques = ARTAdapter._techniques_for_finding(finding)
             if not techniques:
@@ -315,18 +342,16 @@ class ARTAdapter:
                 idx,
             )
             for technique in techniques:
-                records.append((rank, technique, finding.finding_id))
+                records.append((rank, technique, finding))
 
         records.sort(key=lambda x: x[0])
-        # Group by technique, preserving the position of its best-ranked finding
-        # and collecting every motivating finding_id (deduped, rank-ordered).
-        grouped: Dict[str, List[int]] = {}
-        for _, technique, fid in records:
-            bucket = grouped.setdefault(technique, [])
-            if fid not in bucket:
-                bucket.append(fid)
-        for technique, fids in grouped.items():
-            priority.append((technique, fids))
+        # Group by technique (preserving rank order), then collapse to one
+        # finding per CVE so a CVE spanning many packages yields a single row.
+        grouped: Dict[str, List[TrivyFinding]] = {}
+        for _, technique, finding in records:
+            grouped.setdefault(technique, []).append(finding)
+        for technique, group_findings in grouped.items():
+            priority.append((technique, _dedupe_findings_by_cve(group_findings)))
             seen_techniques.add(technique)
 
         # Stack-aware proactive bucket — techniques relevant to the detected

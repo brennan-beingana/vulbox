@@ -272,7 +272,9 @@ def _summary_for(db: Session, entry: SecurityMatrixEntry) -> str:
             .first()
         )
         if finding:
-            parts.append(f"[{finding.severity.upper()}] {finding.cve_id} ({finding.package_name})")
+            # Severity shown as a dedicated badge on the card (see report
+            # rendering); keep it out of the summary text.
+            parts.append(f"{finding.cve_id} ({finding.package_name})")
     if entry.mitre_tactic_id:
         parts.append(f"MITRE {entry.mitre_tactic_id}")
     return " | ".join(parts) if parts else f"Security Matrix Entry #{entry.entry_id}"

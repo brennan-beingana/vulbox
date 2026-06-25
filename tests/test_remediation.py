@@ -41,3 +41,30 @@ def test_default_fallback_is_high():
     entry = _make_entry(is_present=False, is_exploitable=False, is_detectable=False)
     action, _, _, confidence = RemediationService._pick_rule(entry)
     assert "Upgrade" in action or "Monitor" in action or confidence in ("high", "medium", "low", "critical")
+
+
+def test_summary_omits_severity_prefix():
+    # Severity is rendered as its own badge on the card now, so the summary text
+    # must not embed a "[CRITICAL]" prefix (which read as a second severity next
+    # to the confidence badge).
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core.database import Base
+    from app.models.trivy_finding import TrivyFinding
+    from app.services.remediation_service import RemediationService
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(bind=engine)()
+    f = TrivyFinding(run_id=1, cve_id="CVE-2022-1304", severity="critical", package_name="libc6")
+    db.add(f)
+    db.commit()
+    db.refresh(f)
+
+    summary = RemediationService._build_summary(
+        db, _make_entry(finding_id=f.finding_id, mitre_tactic_id="T1203")
+    )
+    assert "[" not in summary
+    assert "CVE-2022-1304" in summary and "libc6" in summary and "T1203" in summary
+    db.close()

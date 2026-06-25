@@ -85,7 +85,11 @@ class RemediationService:
                 TrivyFinding.finding_id == entry.finding_id
             ).first()
             if finding:
-                parts.append(f"[{finding.severity.upper()}] {finding.cve_id} ({finding.package_name})")
+                # Severity is rendered as its own badge on the card, so it is
+                # no longer baked into the summary text (that produced the
+                # "[CRITICAL] … MEDIUM" double-severity confusion next to the
+                # confidence badge).
+                parts.append(f"{finding.cve_id} ({finding.package_name})")
         if entry.mitre_tactic_id:
             parts.append(f"MITRE {entry.mitre_tactic_id}")
         return " | ".join(parts) if parts else f"Security Matrix Entry #{entry.entry_id}"
