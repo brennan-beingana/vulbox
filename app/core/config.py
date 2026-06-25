@@ -42,6 +42,25 @@ class Settings(BaseSettings):
     dev_mode: bool = Field(default=True, validation_alias="VULBOX_DEV_MODE")
     project_root: Path = PROJECT_ROOT
 
+    # Persistent cache for cloned target repos. Remote repo_urls are cloned once
+    # into <local_repos_dir>/<slug> and reused on later runs, so a transient
+    # `git clone` failure on a re-run degrades to the cached checkout instead of
+    # failing the build. Override with VULBOX_LOCAL_REPOS_DIR.
+    local_repos_dir: Path = Field(
+        default=Path("/home/code/local-repos"),
+        validation_alias="VULBOX_LOCAL_REPOS_DIR",
+    )
+
+    # Default sandbox read-only posture when a target has no .vulbox.yml. False
+    # lets the app write to its own disk inside the throwaway container, which
+    # most real server stacks (tomcat/apache/rails/elasticsearch) need just to
+    # boot — under read-only they crash on startup and the run fails before any
+    # scanning/testing. A repo's .vulbox.yml `sandbox.read_only` still overrides
+    # this per-target. Set VULBOX_SANDBOX_READ_ONLY=true to re-lock the default.
+    sandbox_default_read_only: bool = Field(
+        default=False, validation_alias="VULBOX_SANDBOX_READ_ONLY"
+    )
+
     # LLM remediation (Google Gemini). Disabled by default so the demo path
     # keeps working without an API key; enable with VULBOX_LLM_REMEDIATION=true.
     llm_remediation_enabled: bool = Field(
