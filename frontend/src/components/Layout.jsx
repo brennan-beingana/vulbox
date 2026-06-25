@@ -61,9 +61,9 @@ function IconLogout() {
 }
 
 const NAV = [
-  { path: '/',        label: 'Dashboard',  Icon: IconHome },
-  { path: '/reports', label: 'Reports',    Icon: IconList },
-  { path: '/guides',  label: 'Guides',     Icon: IconBook },
+  { path: '/dashboard', label: 'Dashboard',  Icon: IconHome },
+  { path: '/reports',   label: 'Reports',    Icon: IconList },
+  { path: '/guides',    label: 'Guides',     Icon: IconBook },
 ];
 
 function initials(email) {

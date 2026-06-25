@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import NewRun from './pages/NewRun';
@@ -19,7 +20,10 @@ export default function App() {
         <Route path="/login"    element={<Login />} />
         <Route path="/register" element={<Register />} />
 
-        <Route path="/" element={<RequireAuth><NewRun /></RequireAuth>} />
+        {/* Public introductory landing — restrictions & requirements live here. */}
+        <Route path="/" element={<Home />} />
+
+        <Route path="/dashboard" element={<RequireAuth><NewRun /></RequireAuth>} />
         <Route path="/reports" element={<RequireAuth><Reports /></RequireAuth>} />
         <Route path="/guides"  element={<RequireAuth><Guides /></RequireAuth>} />
         <Route path="/profile" element={<RequireAuth><Profile /></RequireAuth>} />

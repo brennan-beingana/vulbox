@@ -135,7 +135,7 @@ export default function RunStatus() {
       {done && status === 'COMPLETE' && (
         <div className="flex gap-3 mb-6">
           <Link to={`/runs/${runId}/report`} className="btn btn-primary">View Security Report</Link>
-          <Link to="/" className="btn btn-secondary">New Assessment</Link>
+          <Link to="/dashboard" className="btn btn-secondary">New Assessment</Link>
         </div>
       )}
 

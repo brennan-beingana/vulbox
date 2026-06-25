@@ -46,7 +46,7 @@ export default function Profile() {
           <div className="card card-pad">
             <div className="card-title mb-4">Quick Actions</div>
             <div className="flex flex-col gap-2">
-              <Link to="/" className="btn btn-primary btn-sm btn-full">New Assessment</Link>
+              <Link to="/dashboard" className="btn btn-primary btn-sm btn-full">New Assessment</Link>
               <Link to="/reports" className="btn btn-secondary btn-sm btn-full">View Reports</Link>
               <Link to="/guides" className="btn btn-secondary btn-sm btn-full">Read Guides</Link>
             </div>

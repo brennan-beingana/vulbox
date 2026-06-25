@@ -105,7 +105,7 @@ export default function Reports() {
                 : `No runs with status "${filter}".`}
             </p>
             {filter === 'ALL' && (
-              <Link to="/" className="btn btn-primary btn-sm mt-4">New Assessment</Link>
+              <Link to="/dashboard" className="btn btn-primary btn-sm mt-4">New Assessment</Link>
             )}
           </div>
         ) : (

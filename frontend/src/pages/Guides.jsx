@@ -66,10 +66,27 @@ const DIMS = [
 ];
 
 const RISK_ROWS = [
-  { range: '40 – 50', color: '#dc2626', label: 'Critical', desc: 'Present, exploited, and undetected — immediate remediation required.' },
+  { range: '40 – 75', color: '#dc2626', label: 'Critical', desc: 'Present, exploited, and undetected — immediate remediation required.' },
   { range: '25 – 39', color: '#ea580c', label: 'High',     desc: 'Exploited but partially detected or a severe static finding.' },
   { range: '15 – 24', color: '#d97706', label: 'Medium',   desc: 'Present and either exploitable or undetected, but not both.' },
   { range: '0  – 14', color: '#059669', label: 'Low',      desc: 'Present but not exploitable or fully detected by Falco.' },
+];
+
+// Accepted repository inputs (DockerManager._parse_repo_url). Kept in sync with
+// the restrictions surfaced on the public Home page.
+const REPO_FORMATS = [
+  { label: 'Plain repository URL', example: 'https://github.com/org/repo' },
+  { label: 'GitHub subdirectory (tree/blob)', example: 'https://github.com/vulhub/vulhub/tree/master/node/CVE-2017-14849' },
+  { label: 'GitLab subdirectory (/-/tree/)', example: 'https://gitlab.com/group/repo/-/tree/main/service' },
+  { label: 'No URL — scan a pre-built image', example: 'Leave blank and set the Image Tag field' },
+];
+
+// What the New-Run severity slider controls (min_severity → matrix attribution).
+const SEVERITY_SLIDER = [
+  { stop: 'Critical', color: '#dc2626', desc: 'Smallest report — only Critical CVEs get an exploitability row.' },
+  { stop: 'High', color: '#ea580c', desc: 'Default — Critical & High findings are attributed.' },
+  { stop: 'Medium', color: '#d97706', desc: 'Adds Medium findings to the matrix.' },
+  { stop: 'Low', color: '#059669', desc: 'Largest report — every finding is tested, including unknown severity.' },
 ];
 
 const FAQS = [
@@ -87,7 +104,7 @@ const FAQS = [
   },
   {
     q: 'How is the risk score calculated?',
-    a: 'Base 10 for any present finding, +30 if the ART test succeeded (exploited), +10 if Falco did not raise an alert (undetected). Maximum score is 50.',
+    a: 'Base 10 for any present finding, +30 if the ART test succeeded (exploited), +10 if Falco did not raise an alert (undetected), plus a severity weight (Critical 20 / High 15 / Medium 10 / Low 5). The score is capped at 75.',
   },
   {
     q: 'Can I run VulBox against a private repository?',
@@ -96,6 +113,10 @@ const FAQS = [
   {
     q: 'What is dev mode?',
     a: 'When VULBOX_DEV_MODE=true, all adapters read from fixture files in data/sample_outputs/ instead of running real Docker, Trivy, Falco, or ART processes. This is useful for UI development and testing without a full environment.',
+  },
+  {
+    q: 'What export formats are available?',
+    a: 'From the Report screen you can download the full assessment as JSON (machine-readable), CSV (the Security Matrix as a spreadsheet), or PDF (a formatted report for sharing). All three follow the same critical-to-low ordering as the on-screen report.',
   },
 ];
 
@@ -112,7 +133,7 @@ export default function Guides() {
           container, scans it with Trivy, runs Atomic Red Team adversarial tests, and measures presence,
           exploitability, and detectability — producing a three-dimensional Security Matrix.
         </p>
-        <Link to="/" className="btn btn-primary btn-sm">Launch an Assessment</Link>
+        <Link to="/dashboard" className="btn btn-primary btn-sm">Launch an Assessment</Link>
       </div>
 
       <div className="grid-2" style={{ alignItems: 'start', marginBottom: '2rem' }}>
@@ -136,7 +157,7 @@ export default function Guides() {
             <div className="section-heading">The Security Matrix</div>
             <p className="text-sm text-muted mb-4" style={{ lineHeight: 1.65 }}>
               Every finding is assessed across three independent dimensions. The combination determines
-              the risk score (0 – 50) and the priority of remediation.
+              the risk score (0 – 75) and the priority of remediation.
             </p>
             {DIMS.map(d => (
               <div key={d.label} className="dim-card mb-3">
@@ -198,6 +219,117 @@ export default function Guides() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* Requirements & restrictions (detailed — the Home page carries the summary) */}
+      <div className="card card-pad mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="section-heading" style={{ margin: 0, border: 'none', padding: 0 }}>Requirements &amp; Restrictions</div>
+          <Link to="/" className="btn btn-secondary btn-xs">Summary on Home</Link>
+        </div>
+        <div className="grid-2" style={{ alignItems: 'start' }}>
+          <div>
+            <div className="fw-600 mb-2" style={{ fontSize: '0.9375rem', color: '#dc2626' }}>Authorization &amp; consent</div>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)', lineHeight: 1.65 }}>
+              Only submit repositories you own or are explicitly authorized to test. Every run is
+              intentionally adversarial, so the <strong>consent checkbox is mandatory</strong> — the API
+              rejects a run (HTTP&nbsp;400) without it.
+            </p>
+          </div>
+          <div>
+            <div className="fw-600 mb-2" style={{ fontSize: '0.9375rem', color: '#d97706' }}>Host prerequisites</div>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)', lineHeight: 1.65 }}>
+              A real (full-mode) assessment needs <strong>Docker, Trivy, and Falco</strong> installed on the
+              host. Dev mode replays bundled fixtures instead, so the UI and reports work without that
+              toolchain.
+            </p>
+          </div>
+          <div>
+            <div className="fw-600 mb-2" style={{ fontSize: '0.9375rem', color: '#059669' }}>Isolation</div>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)', lineHeight: 1.65 }}>
+              Your code is built into a throwaway image and run in a sandbox with <strong>no network
+              access</strong>, then destroyed when the assessment ends. Production is never touched.
+            </p>
+          </div>
+          <div>
+            <div className="fw-600 mb-2" style={{ fontSize: '0.9375rem', color: '#7c3aed' }}>Private results</div>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)', lineHeight: 1.65 }}>
+              You only see assessments you submitted — results are scoped to your account. Administrator
+              accounts can review every run for oversight.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid-2" style={{ alignItems: 'start', marginBottom: '1.5rem' }}>
+        {/* Accepted repository inputs */}
+        <div className="card card-pad">
+          <div className="section-heading">Accepted Repository Inputs</div>
+          <p className="text-sm text-muted mb-4" style={{ lineHeight: 1.65 }}>
+            The repository field accepts several forms. Branch names containing a slash are not supported.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+            {REPO_FORMATS.map(f => (
+              <div key={f.label}>
+                <div className="fw-600 text-sm mb-1">{f.label}</div>
+                <code
+                  style={{
+                    display: 'block', fontSize: '0.8125rem', color: 'var(--text-secondary)',
+                    background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
+                    padding: '0.5rem 0.625rem', wordBreak: 'break-all',
+                  }}
+                >
+                  {f.example}
+                </code>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Controlling report size */}
+        <div className="card card-pad">
+          <div className="section-heading">Controlling Report Size</div>
+          <p className="text-sm text-muted mb-4" style={{ lineHeight: 1.65 }}>
+            The <strong>Minimum Severity to Test</strong> slider on the New Run form governs which findings
+            get a full exploitability row in the Security Matrix — the main lever on report size. The
+            technique still runs regardless; this only changes how many CVEs are attributed.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+            {SEVERITY_SLIDER.map(s => (
+              <div key={s.stop} className="flex items-center gap-3">
+                <span className="badge" style={{ background: s.color, color: '#fff', minWidth: 64, justifyContent: 'center' }}>{s.stop}</span>
+                <div className="text-xs text-muted">{s.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Running modes */}
+      <div className="card card-pad mb-6">
+        <div className="section-heading">Running Modes</div>
+        <div className="table-wrap" style={{ border: 'none', borderRadius: 0 }}>
+          <table className="tbl">
+            <thead>
+              <tr><th>Mode</th><th>What runs</th><th>When to use</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span className="badge badge-info">Dev</span></td>
+                <td className="text-sm">Adapters replay fixture outputs from <code>data/sample_outputs/</code>; no Docker, Trivy, Falco, or ART processes are launched.</td>
+                <td className="text-sm text-muted">UI work, demos, and trying VulBox without the toolchain.</td>
+              </tr>
+              <tr>
+                <td><span className="badge badge-success">Production</span></td>
+                <td className="text-sm">Real Docker build, Trivy scan, Falco monitoring, and Atomic Red Team execution against the target.</td>
+                <td className="text-sm text-muted">Actual assessments on a host with Docker + Trivy + Falco.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p className="text-xs text-muted mt-4">
+          The live mode is shown on the API <code>/health</code> endpoint and echoed in the startup logs.
+        </p>
       </div>
 
       {/* FAQ */}
